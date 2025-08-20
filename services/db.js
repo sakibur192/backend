@@ -4,8 +4,9 @@ require('dotenv').config();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // if using remote DB with SSL, set ssl: { rejectUnauthorized: false }
-  ssl: false
+  ssl: {
+    rejectUnauthorized: false, // Required for most cloud Postgres providers
+  },
 });
 
 pool.on('error', (err) => {
