@@ -250,99 +250,175 @@ function verifyFSDigest(req, res, next) {
     return res.json({ code: 500, msg: "Digest error" });
   }
 }
-router.post("/wallet/getBalance", verifyFSDigest, async (req, res) => {
-  const { acctId, currency } = req.body;
-  console.log("⚡ FS -> getBalance request:", req.body);
 
+router.post("/wallet", async (req, res) => {
   try {
-    const { rows } = await pool.query("SELECT balance FROM users WHERE id=$1", [acctId]);
-    const balance = rows[0]?.balance || 0;
+    const { api, acctId, amount, serialNo, token, merchantCode, digest } = req.body;
 
-    console.log(`💰 Returning balance for acctId=${acctId}: ${balance}`);
-
-    return res.json({
-      acctId,
-      currency,
-      balance,
-      code: 0,
-      msg: "success",
-    });
-  } catch (err) {
-    console.error("❌ getBalance error:", err);
-    return res.json({ code: 500, msg: "internal error" });
-  }
-});
-
-router.post("/wallet/debit", verifyFSDigest, async (req, res) => {
-  const { acctId, amount, currency, transactionId } = req.body;
-  console.log("⚡ FS -> debit request:", req.body);
-
-  try {
-    await pool.query("BEGIN");
-    const { rows } = await pool.query("SELECT balance FROM users WHERE id=$1", [acctId]);
-
-    if (!rows[0] || rows[0].balance < amount) {
-      console.warn(`⚠️ Insufficient funds for acctId=${acctId}`);
-      return res.json({ code: 101, msg: "Insufficient funds" });
+    // 1. Verify digest
+    const expected = createDigest(merchantCode, token, process.env.FASTSPIN_SECRET, serialNo);
+    if (digest !== expected) {
+      return res.status(400).json({ code: 401, msg: "Invalid digest" });
     }
 
-    const newBalance = rows[0].balance - amount;
-    await pool.query("UPDATE users SET balance=$1 WHERE id=$2", [newBalance, acctId]);
-    await pool.query(
-      "INSERT INTO fastspin_transactions (user_id, type, amount, balance_after, transaction_id) VALUES ($1,$2,$3,$4,$5)",
-      [acctId, "debit", amount, newBalance, transactionId]
-    );
-    await pool.query("COMMIT");
+    // 2. Fetch user
+    const q = await pool.query("SELECT id, balance FROM users WHERE id = $1", [acctId]);
+    if (!q.rows.length) {
+      return res.json({ code: 404, msg: "User not found", balance: 0 });
+    }
+    let balance = parseFloat(q.rows[0].balance);
 
-    console.log(`💸 Debit success acctId=${acctId}, newBalance=${newBalance}`);
-
-    return res.json({
-      acctId,
-      balance: newBalance,
-      code: 0,
-      msg: "success",
-    });
-  } catch (err) {
-    await pool.query("ROLLBACK");
-    console.error("❌ Debit error:", err);
-    return res.json({ code: 500, msg: "internal error" });
-  }
-});
-
-router.post("/wallet/credit", verifyFSDigest, async (req, res) => {
-  const { acctId, amount, currency, transactionId } = req.body;
-  console.log("⚡ FS -> credit request:", req.body);
-
-  try {
-    await pool.query("BEGIN");
-    const { rows } = await pool.query("SELECT balance FROM users WHERE id=$1", [acctId]);
-    if (!rows[0]) {
-      console.warn(`⚠️ User not found acctId=${acctId}`);
-      return res.json({ code: 102, msg: "User not found" });
+    // 3. Handle operation
+    if (api === "getBalance") {
+      return res.json({ code: 0, msg: "success", balance });
     }
 
-    const newBalance = rows[0].balance + amount;
-    await pool.query("UPDATE users SET balance=$1 WHERE id=$2", [newBalance, acctId]);
-    await pool.query(
-      "INSERT INTO fastspin_transactions (user_id, type, amount, balance_after, transaction_id) VALUES ($1,$2,$3,$4,$5)",
-      [acctId, "credit", amount, newBalance, transactionId]
-    );
-    await pool.query("COMMIT");
+    if (api === "debit") {
+      if (balance < amount) {
+        return res.json({ code: 402, msg: "Insufficient funds", balance });
+      }
+      balance -= amount;
+      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
+      return res.json({ code: 0, msg: "success", balance });
+    }
 
-    console.log(`💰 Credit success acctId=${acctId}, newBalance=${newBalance}`);
+    if (api === "credit") {
+      balance += amount;
+      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
+      return res.json({ code: 0, msg: "success", balance });
+    }
 
-    return res.json({
-      acctId,
-      balance: newBalance,
-      code: 0,
-      msg: "success",
-    });
+    if (api === "rollback") {
+      // optional: handle rollback logic
+      return res.json({ code: 0, msg: "rollback success", balance });
+    }
+
+    return res.status(400).json({ code: 400, msg: "Unknown API" });
   } catch (err) {
-    await pool.query("ROLLBACK");
-    console.error("❌ Credit error:", err);
-    return res.json({ code: 500, msg: "internal error" });
+    console.error("❌ Wallet error:", err);
+    res.status(500).json({ code: 500, msg: "Wallet server error" });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+// router.post("/wallet/getBalance", verifyFSDigest, async (req, res) => {
+//   const { acctId, currency } = req.body;
+//   console.log("⚡ FS -> getBalance request:", req.body);
+
+//   try {
+//     const { rows } = await pool.query("SELECT balance FROM users WHERE id=$1", [acctId]);
+//     const balance = rows[0]?.balance || 0;
+
+//     console.log(`💰 Returning balance for acctId=${acctId}: ${balance}`);
+
+//     return res.json({
+//       acctId,
+//       currency,
+//       balance,
+//       code: 0,
+//       msg: "success",
+//     });
+//   } catch (err) {
+//     console.error("❌ getBalance error:", err);
+//     return res.json({ code: 500, msg: "internal error" });
+//   }
+// });
+
+
+
+// ⚠️ Catch-all wallet route for debugging FastSpin misconfig
+// ⚠️ Catch-all wallet route for debugging FastSpin misconfig
+// router.post("/wallet", (req, res) => {
+//   console.log("⚡ FS hit /wallet instead of /wallet/getBalance|debit|credit");
+//   console.log("📥 Incoming Body:", req.body);
+
+//   return res.status(400).json({
+//     code: 400,
+//     msg: "Invalid wallet endpoint. Expected /wallet/getBalance, /wallet/debit, or /wallet/credit",
+//   });
+// });
+
+
+
+// router.post("/wallet/debit", verifyFSDigest, async (req, res) => {
+//   const { acctId, amount, currency, transactionId } = req.body;
+//   console.log("⚡ FS -> debit request:", req.body);
+
+//   try {
+//     await pool.query("BEGIN");
+//     const { rows } = await pool.query("SELECT balance FROM users WHERE id=$1", [acctId]);
+
+//     if (!rows[0] || rows[0].balance < amount) {
+//       console.warn(`⚠️ Insufficient funds for acctId=${acctId}`);
+//       return res.json({ code: 101, msg: "Insufficient funds" });
+//     }
+
+//     const newBalance = rows[0].balance - amount;
+//     await pool.query("UPDATE users SET balance=$1 WHERE id=$2", [newBalance, acctId]);
+//     await pool.query(
+//       "INSERT INTO fastspin_transactions (user_id, type, amount, balance_after, transaction_id) VALUES ($1,$2,$3,$4,$5)",
+//       [acctId, "debit", amount, newBalance, transactionId]
+//     );
+//     await pool.query("COMMIT");
+
+//     console.log(`💸 Debit success acctId=${acctId}, newBalance=${newBalance}`);
+
+//     return res.json({
+//       acctId,
+//       balance: newBalance,
+//       code: 0,
+//       msg: "success",
+//     });
+//   } catch (err) {
+//     await pool.query("ROLLBACK");
+//     console.error("❌ Debit error:", err);
+//     return res.json({ code: 500, msg: "internal error" });
+//   }
+// });
+
+// router.post("/wallet/credit", verifyFSDigest, async (req, res) => {
+//   const { acctId, amount, currency, transactionId } = req.body;
+//   console.log("⚡ FS -> credit request:", req.body);
+
+//   try {
+//     await pool.query("BEGIN");
+//     const { rows } = await pool.query("SELECT balance FROM users WHERE id=$1", [acctId]);
+//     if (!rows[0]) {
+//       console.warn(`⚠️ User not found acctId=${acctId}`);
+//       return res.json({ code: 102, msg: "User not found" });
+//     }
+
+//     const newBalance = rows[0].balance + amount;
+//     await pool.query("UPDATE users SET balance=$1 WHERE id=$2", [newBalance, acctId]);
+//     await pool.query(
+//       "INSERT INTO fastspin_transactions (user_id, type, amount, balance_after, transaction_id) VALUES ($1,$2,$3,$4,$5)",
+//       [acctId, "credit", amount, newBalance, transactionId]
+//     );
+//     await pool.query("COMMIT");
+
+//     console.log(`💰 Credit success acctId=${acctId}, newBalance=${newBalance}`);
+
+//     return res.json({
+//       acctId,
+//       balance: newBalance,
+//       code: 0,
+//       msg: "success",
+//     });
+//   } catch (err) {
+//     await pool.query("ROLLBACK");
+//     console.error("❌ Credit error:", err);
+//     return res.json({ code: 500, msg: "internal error" });
+//   }
+// });
 // 👉 Balance
 // router.post("/wallet/getBalance", async (req, res) => {
 //   const digestHeader = req.headers["digest"];
