@@ -35,15 +35,15 @@ function generateDigest(payload) {
   return digest;
 }
 // ⚠️ Catch-all wallet route for debugging FastSpin misconfig
-router.post("/wallet", (req, res) => {
-  console.log("⚡ FS hit /wallet instead of /wallet/getBalance|debit|credit");
-  console.log("📥 Incoming Body:", req.body);
+// router.post("/wallet", (req, res) => {
+//   console.log("⚡ FS hit /wallet instead of /wallet/getBalance|debit|credit");
+//   console.log("📥 Incoming Body:", req.body);
 
-  return res.status(400).json({
-    code: 400,
-    msg: "Invalid wallet endpoint. Expected /wallet/getBalance, /wallet/debit, or /wallet/credit",
-  });
-});
+//   return res.status(400).json({
+//     code: 400,
+//     msg: "Invalid wallet endpoint. Expected /wallet/getBalance, /wallet/debit, or /wallet/credit",
+//   });
+// });
 
 // ========== DEBUG ROUTE (no auth, no db) ==========
 router.get("/test-fastspin", async (req, res) => {
