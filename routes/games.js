@@ -252,6 +252,9 @@ function verifyFSDigest(req, res, next) {
 }
 
 router.post("/wallet", async (req, res) => {
+
+console.log("🎮 FastSpin Games Response:", JSON.stringify(response.data, null, 2));
+  
   try {
     const { api, acctId, amount, serialNo, token, merchantCode, digest } = req.body;
 
