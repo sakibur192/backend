@@ -268,7 +268,7 @@ router.post("/wallet", async (req, res) => {
     } = req.body;
 
     // 1. Verify digest
-    const expectedDigest = createDigest(req.body, process.env.FASTSPIN_SECRET);
+    const expectedDigest = createDigest(req.body, SECRET_KEY);
     if (digest !== expectedDigest) {
       return res.status(400).json({ code: 401, msg: "Invalid digest" });
     }
