@@ -254,6 +254,9 @@ function verifyFSDigest(req, res, next) {
 
 // backend/routes/games.js (add this after your launch-game route)
 router.post("/wallet", async (req, res) => {
+
+   console.log("📩 Raw Wallet Payload:", req.body);
+  
   try {
     console.log("📩 Incoming Wallet Payload:", req.body);
 
