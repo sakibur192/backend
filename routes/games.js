@@ -228,7 +228,7 @@ async function isTransferProcessed(transferId) {
 router.post("/wallet", async (req, res) => {
   try {
     const payload = req.body;
-    log("Incoming Payload:", JSON.stringify(payload, null, 2));
+    console.log("Incoming Payload:", JSON.stringify(payload, null, 2));
 
     const {
       api, // "getBalance" or "transfer"
@@ -259,7 +259,7 @@ router.post("/wallet", async (req, res) => {
 
     // ✅ 1. Handle getBalance
     if (api === "getBalance") {
-      log(`Returning balance for acctId=${acctId}: ${balance}`);
+      console.log(`Returning balance for acctId=${acctId}: ${balance}`);
       return res.json({
         acctInfo: {
           acctId: acctId.toString(),
@@ -283,7 +283,7 @@ router.post("/wallet", async (req, res) => {
 
       // Idempotency check
       if (await isTransferProcessed(transferId)) {
-        log(`Duplicate transferId=${transferId}, returning current balance`);
+        console.log(`Duplicate transferId=${transferId}, returning current balance`);
         return res.json({
           transferId,
           acctId,
@@ -331,7 +331,7 @@ router.post("/wallet", async (req, res) => {
         ]
       );
 
-      log(`Processed transferId=${transferId}, new balance=${balance}`);
+      console.log(`Processed transferId=${transferId}, new balance=${balance}`);
 
       return res.json({
         transferId,
