@@ -214,6 +214,167 @@ router.post("/get-authorized", authMiddleware, async (req, res) => {
   }
 });
 
+router.post("/wallet", async (req, res) => {
+  console.log("📩 Incoming Wallet Payload:", JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      api,
+      merchantCode,
+      token,
+      serialNo,
+      acctInfo,
+      acctId,
+      amount,
+      digest,
+    } = req.body;
+
+    // 1. Extract account ID
+    const userId = acctInfo?.acctId || acctId;
+    if (!userId) {
+      console.error("❌ Missing acctId in payload");
+      return res.status(400).json({ code: 400, msg: "Missing acctId" });
+    }
+
+    // 2. Verify required fields
+    if (!api || !merchantCode || !serialNo) {
+      console.error("❌ Missing required fields");
+      return res.status(400).json({ code: 400, msg: "Missing required fields" });
+    }
+
+    // 🔐 Optional: validate digest if FastSpin sends it
+    if (digest) {
+      const expectedDigest = createDigest(req.body, SECRET_KEY);
+      if (digest !== expectedDigest) {
+        console.error("❌ Invalid digest");
+        return res.status(400).json({ code: 401, msg: "Invalid digest" });
+      }
+    } else {
+      console.warn("⚠️ Digest not provided by FastSpin (skipping validation)");
+    }
+
+    // 3. Fetch user balance
+    const q = await pool.query("SELECT id, balance FROM users WHERE id = $1", [userId]);
+    if (!q.rows.length) {
+      console.error(`❌ User ${userId} not found`);
+      return res.json({
+        serialNo,
+        merchantCode,
+        acctId: userId,
+        balance: 0,
+        code: 404,
+        msg: "User not found",
+      });
+    }
+    let balance = parseFloat(q.rows[0].balance);
+    console.log(`💰 Current balance for user ${userId}: ${balance}`);
+
+    // 4. Handle API operations
+    if (api === "getBalance") {
+      console.log(`🔍 getBalance for user ${userId}`);
+      return res.json({
+        serialNo,
+        merchantCode,
+        acctId: userId,
+        balance,
+        code: 0,
+        msg: "success",
+      });
+    }
+
+    if (api === "debit") {
+      console.log(`💸 Debit request: ${amount} from user ${userId}`);
+      if (balance < amount) {
+        console.warn("⚠️ Insufficient funds");
+        return res.json({
+          serialNo,
+          merchantCode,
+          acctId: userId,
+          balance,
+          code: 402,
+          msg: "Insufficient funds",
+        });
+      }
+      balance -= amount;
+      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, userId]);
+      await pool.query(
+        `INSERT INTO transactions (user_id, type, amount, balance_after, description, serial_no) 
+         VALUES ($1, 'debit', $2, $3, 'FastSpin bet placed', $4)`,
+        [userId, amount, balance, serialNo]
+      );
+      console.log(`✅ Debit success. New balance: ${balance}`);
+      return res.json({
+        serialNo,
+        merchantCode,
+        acctId: userId,
+        balance,
+        code: 0,
+        msg: "success",
+      });
+    }
+
+    if (api === "credit") {
+      console.log(`💰 Credit request: ${amount} to user ${userId}`);
+      balance += amount;
+      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, userId]);
+      await pool.query(
+        `INSERT INTO transactions (user_id, type, amount, balance_after, description, serial_no) 
+         VALUES ($1, 'credit', $2, $3, 'FastSpin payout', $4)`,
+        [userId, amount, balance, serialNo]
+      );
+      console.log(`✅ Credit success. New balance: ${balance}`);
+      return res.json({
+        serialNo,
+        merchantCode,
+        acctId: userId,
+        balance,
+        code: 0,
+        msg: "success",
+      });
+    }
+
+    if (api === "rollback") {
+      console.log(`↩️ Rollback request for serialNo ${serialNo}`);
+      const tx = await pool.query(
+        "SELECT * FROM transactions WHERE serial_no = $1 AND type = 'debit'",
+        [serialNo]
+      );
+      if (!tx.rows.length) {
+        console.warn("⚠️ No transaction found to rollback");
+        return res.json({
+          serialNo,
+          merchantCode,
+          acctId: userId,
+          balance,
+          code: 404,
+          msg: "No transaction to rollback",
+        });
+      }
+      balance += parseFloat(tx.rows[0].amount);
+      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, userId]);
+      await pool.query(
+        `INSERT INTO transactions (user_id, type, amount, balance_after, description, serial_no) 
+         VALUES ($1, 'rollback', $2, $3, 'Rollback bet', $4)`,
+        [userId, tx.rows[0].amount, balance, serialNo]
+      );
+      console.log(`✅ Rollback success. New balance: ${balance}`);
+      return res.json({
+        serialNo,
+        merchantCode,
+        acctId: userId,
+        balance,
+        code: 0,
+        msg: "rollback success",
+      });
+    }
+
+    console.error("❌ Unknown API:", api);
+    return res.status(400).json({ code: 400, msg: "Unknown API" });
+  } catch (err) {
+    console.error("❌ Wallet error:", err);
+    res.status(500).json({ code: 500, msg: "Wallet server error" });
+  }
+});
 
 
 
@@ -251,95 +412,6 @@ function verifyFSDigest(req, res, next) {
   }
 }
 
-
-router.post("/wallet", async (req, res) => {
-  console.log("📩 Incoming Wallet Payload:", JSON.stringify(req.body, null, 2));
-
-  try {
-    const {
-      api,                // required
-      merchantCode,
-      token,
-      serialNo,
-      acctInfo,
-      amount,
-      digest,
-    } = req.body;
-
-    // 1. Validate required fields
-    if (!api || !merchantCode || !token || !serialNo || !acctInfo?.acctId || !digest) {
-      return res.status(400).json({ code: 400, msg: "Missing required fields" });
-    }
-
-    // 2. Verify digest
-    const expectedDigest = createDigest(req.body, SECRET_KEY);
-    if (digest !== expectedDigest) {
-      return res.status(400).json({ code: 401, msg: "Invalid digest" });
-    }
-
-    const acctId = acctInfo.acctId;
-
-    // 3. Fetch user
-    const q = await pool.query("SELECT id, balance FROM users WHERE id = $1", [acctId]);
-    if (!q.rows.length) {
-      return res.json({ code: 404, msg: "User not found", balance: 0 });
-    }
-    let balance = parseFloat(q.rows[0].balance);
-
-    // 4. Handle APIs
-    if (api === "getBalance") {
-      return res.json({ code: 0, msg: "success", balance });
-    }
-
-    if (api === "debit") {
-      if (balance < amount) {
-        return res.json({ code: 402, msg: "Insufficient funds", balance });
-      }
-      balance -= amount;
-      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
-      await pool.query(
-        `INSERT INTO transactions (user_id, type, amount, balance_after, description, serial_no) 
-         VALUES ($1, 'debit', $2, $3, 'FastSpin bet placed', $4)`,
-        [acctId, amount, balance, serialNo]
-      );
-      return res.json({ code: 0, msg: "success", balance });
-    }
-
-    if (api === "credit") {
-      balance += amount;
-      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
-      await pool.query(
-        `INSERT INTO transactions (user_id, type, amount, balance_after, description, serial_no) 
-         VALUES ($1, 'credit', $2, $3, 'FastSpin payout', $4)`,
-        [acctId, amount, balance, serialNo]
-      );
-      return res.json({ code: 0, msg: "success", balance });
-    }
-
-    if (api === "rollback") {
-      const tx = await pool.query(
-        "SELECT * FROM transactions WHERE serial_no = $1 AND type = 'debit'",
-        [serialNo]
-      );
-      if (!tx.rows.length) {
-        return res.json({ code: 404, msg: "No transaction to rollback" });
-      }
-      balance += parseFloat(tx.rows[0].amount);
-      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
-      await pool.query(
-        `INSERT INTO transactions (user_id, type, amount, balance_after, description, serial_no) 
-         VALUES ($1, 'rollback', $2, $3, 'Rollback bet', $4)`,
-        [acctId, tx.rows[0].amount, balance, serialNo]
-      );
-      return res.json({ code: 0, msg: "rollback success", balance });
-    }
-
-    return res.status(400).json({ code: 400, msg: "Unknown API" });
-  } catch (err) {
-    console.error("❌ Wallet error:", err);
-    res.status(500).json({ code: 500, msg: "Wallet server error" });
-  }
-});
 
 
 
