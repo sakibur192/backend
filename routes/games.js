@@ -230,6 +230,16 @@ function verifyDigest(rawBody, secretKey, incomingDigest) {
   return calc === incomingDigest;
 }
 
+const crypto = require("crypto");
+
+function verifyDigest(rawBody, secretKey, incomingDigest) {
+  const calc = crypto
+    .createHash("md5")
+    .update(rawBody + secretKey, "utf8")
+    .digest("hex");
+  return calc === incomingDigest;
+}
+
 router.post("/wallet", async (req, res) => {
   console.log("===============================================");
   console.log("📩 Incoming Wallet Request at", new Date().toISOString());
@@ -250,11 +260,11 @@ router.post("/wallet", async (req, res) => {
     console.error("❌ Digest mismatch!");
     const response = {
       serialNo: req.body.serialNo || null,
+      merchantCode: "CASINO1",
+      acctId: String(req.body.acctId || ""),
+      balance: 0,
       code: 401,
       msg: "Invalid digest",
-      merchantCode: req.body.merchantCode || MERCHANT_CODE,
-      acctId: req.body.acctId || null,
-      balance: 0,
     };
     console.log("📤 Responding (Digest error):", JSON.stringify(response));
     return res.status(400).json(response);
@@ -282,11 +292,11 @@ router.post("/wallet", async (req, res) => {
       console.warn(`❌ User not found: acctId=${acctId}`);
       const response = {
         serialNo,
+        merchantCode: "CASINO1",
+        acctId: String(acctId),
+        balance: 0,
         code: 404,
         msg: "User not found",
-        merchantCode,
-        acctId,
-        balance: 0,
       };
       console.log("📤 Responding (User not found):", JSON.stringify(response));
       return res.json(response);
@@ -303,11 +313,11 @@ router.post("/wallet", async (req, res) => {
       console.log("🔍 Detected Balance Check Request");
       const response = {
         serialNo,
+        merchantCode: "CASINO1",
+        acctId: String(acctId),
+        balance: Number(balance),
         code: 0,
         msg: "success",
-        merchantCode,
-        acctId,
-        balance,
       };
       console.log("📤 Responding (Balance Check):", JSON.stringify(response));
       res.setHeader("Content-Type", "application/json; charset=UTF-8");
@@ -319,45 +329,41 @@ router.post("/wallet", async (req, res) => {
       console.error("❌ Missing required fields for transfer:", req.body);
       const response = {
         serialNo,
+        merchantCode: "CASINO1",
+        acctId: String(acctId),
+        balance: Number(balance),
         code: 400,
         msg: "Missing required fields for transfer",
-        merchantCode,
-        acctId,
-        balance,
       };
       console.log("📤 Responding (Bad request):", JSON.stringify(response));
       return res.status(400).json(response);
     }
 
-    // ✅ Idempotency
+    // ✅ Idempotency check
     const existing = await pool.query(
       "SELECT * FROM fs_transactions WHERE transfer_id = $1",
       [transferId]
     );
     if (existing.rows.length) {
-      console.warn(
-        `⚠️ Duplicate transferId ${transferId}, returning existing result`
-      );
+      console.warn(`⚠️ Duplicate transferId ${transferId}, returning existing result`);
       const response = {
         serialNo,
-        code: 0,
-        msg: "success (duplicate ignored)",
-        merchantCode,
+        merchantCode: "CASINO1",
         transferId,
         merchantTxId: existing.rows[0].id,
-        acctId,
-        balance: existing.rows[0].balance_after,
+        acctId: String(acctId),
+        balance: Number(existing.rows[0].balance_after),
+        code: 0,
+        msg: "success (duplicate ignored)",
       };
       console.log("📤 Responding (Duplicate):", JSON.stringify(response));
       return res.json(response);
     }
 
     await pool.query("BEGIN");
-    console.log(
-      `⚙️ Processing transfer: type=${type}, amount=${amount}, acctId=${acctId}`
-    );
+    console.log(`⚙️ Processing transfer: type=${type}, amount=${amount}, acctId=${acctId}`);
 
-    // ✅ Process types
+    // ✅ Process transaction types
     if (type === 1) {
       console.log("🎲 Place Bet request");
       if (balance < amount) {
@@ -365,12 +371,12 @@ router.post("/wallet", async (req, res) => {
         await pool.query("ROLLBACK");
         const response = {
           serialNo,
+          merchantCode: "CASINO1",
+          transferId,
+          acctId: String(acctId),
+          balance: Number(balance),
           code: 402,
           msg: "Insufficient funds",
-          merchantCode,
-          transferId,
-          acctId,
-          balance,
         };
         console.log("📤 Responding (Insufficient funds):", JSON.stringify(response));
         return res.json(response);
@@ -390,25 +396,25 @@ router.post("/wallet", async (req, res) => {
       await pool.query("ROLLBACK");
       const response = {
         serialNo,
+        merchantCode: "CASINO1",
+        transferId,
+        acctId: String(acctId),
+        balance: Number(balance),
         code: 400,
         msg: "Unknown transfer type",
-        merchantCode,
-        transferId,
-        acctId,
-        balance,
       };
       console.log("📤 Responding (Unknown type):", JSON.stringify(response));
       return res.status(400).json(response);
     }
 
-    // ✅ Update balance
+    // ✅ Update user balance
     await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [
       balance,
       acctId,
     ]);
     console.log(`💾 Balance updated in DB: newBalance=${balance}`);
 
-    // ✅ Record transaction
+    // ✅ Save transaction
     const insertRes = await pool.query(
       `INSERT INTO fs_transactions 
        (transfer_id, acct_id, type, amount, balance_after, game_code, reference_id)
@@ -418,20 +424,18 @@ router.post("/wallet", async (req, res) => {
 
     await pool.query("COMMIT");
     const newTxId = insertRes.rows[0].id;
-    console.log(
-      `✅ Transfer recorded: transferId=${transferId}, merchantTxId=${newTxId}`
-    );
+    console.log(`✅ Transfer recorded: transferId=${transferId}, merchantTxId=${newTxId}`);
 
-    // ✅ Respond (Transfer)
+    // ✅ Respond to FastSpin
     const response = {
       serialNo,
-      code: 0,
-      msg: "success",
-      merchantCode,
+      merchantCode: "CASINO1",
       transferId,
       merchantTxId: newTxId,
-      acctId,
-      balance,
+      acctId: String(acctId),
+      balance: Number(balance),
+      code: 0,
+      msg: "success",
     };
     console.log("📤 Responding (Transfer):", JSON.stringify(response));
     res.setHeader("Content-Type", "application/json; charset=UTF-8");
@@ -443,6 +447,7 @@ router.post("/wallet", async (req, res) => {
     return res.status(500).json({ code: 500, msg: "Wallet server error" });
   }
 });
+
 
 
 
