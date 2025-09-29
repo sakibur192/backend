@@ -331,107 +331,13 @@ router.post("/wallet", async (req, res) => {
       return res.status(400).json(response);
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  const existing = await pool.query(
-  "SELECT * FROM transactions WHERE transfer_id = $1",
-  [transferId]
-);
-
-if (existing.rows.length) {
-  console.warn(`⚠️ Duplicate transferId ${transferId}, returning existing result`);
-  const response = {
-    serialNo,
-    merchantCode: "CASINO1",
-    transferId,
-    merchantTxId: existing.rows[0].id,
-    acctId: String(acctId),
-    balance: Number(existing.rows[0].balance_after),
-    code: 0,
-    msg: "success (duplicate ignored)",
-  };
-  console.log("📤 Responding (Duplicate):", JSON.stringify(response));
-  return res.json(response);
-}
-
-// ✅ Insert new transaction
-const insertResx = await pool.query(
-  `INSERT INTO transactions (user_id, type, amount, balance_after, description, transfer_id)
-   VALUES ($1, $2, $3, $4, $5, $6)
-   RETURNING id`,
-  [
-    acctId,
-    type === 1 ? "bet" : type === 2 ? "cancel_bet" : type === 4 ? "payout" : "other",
-    amount,
-    balance,
-    `FastSpin ${type} transaction`,
-    transferId
-  ]
-);
-
-const newTxIdx = insertResx.rows[0].id;
-console.log(`✅ Transfer recorded: transferId=${transferId}, merchantTxId=${newTxIdx}`);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    // ✅ Idempotency check
+    const existing = await pool.query(
+      "SELECT * FROM transactions WHERE transfer_id = $1",
+      [transferId]
+    );
+
+    
     if (existing.rows.length) {
       console.warn(`⚠️ Duplicate transferId ${transferId}, returning existing result`);
       const response = {
