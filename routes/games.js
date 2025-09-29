@@ -239,35 +239,6 @@ function verifyDigest(rawBody, secretKey, incomingDigest) {
 
 
 router.post("/wallet", async (req, res) => {
-
-
-
-
-
-
-  try {
-    await pool.query(`
-      ALTER TABLE transactions
-      ADD COLUMN IF NOT EXISTS transfer_id VARCHAR(100) UNIQUE,
-      ADD COLUMN IF NOT EXISTS game_code VARCHAR(50),
-      ADD COLUMN IF NOT EXISTS reference_id VARCHAR(100);
-    `);
-
-    console.log("✅ Migration applied: transactions table updated");
-    return res.json({ success: true, message: "Migration applied successfully" });
-  } catch (err) {
-    console.error("❌ Migration failed:", err);
-    return res.status(500).json({ success: false, error: err.message });
-  }
-
-
-
-
-
-
-
-
-
   console.log("===============================================");
   console.log("📩 Incoming Wallet Request at", new Date().toISOString());
   console.log("Headers:", JSON.stringify(req.headers, null, 2));
