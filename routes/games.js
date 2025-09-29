@@ -5,7 +5,7 @@ const authMiddleware = require("../middleware/authMiddleware"); // ✅ Verify JW
 const pool = require("../services/db"); // ✅ PostgreSQL
 const router = express.Router();
 const md5 = require("md5"); 
-
+const { v4: uuidv4 } = require("uuid");
 
 
 require('dotenv').config();
@@ -122,6 +122,12 @@ console.log("🚀 fastspingame.js routes loaded");
 // ========== AUTHORIZE GAME ==========
 
 
+function generateSerialNo() {
+  return Date.now().toString();
+}
+
+
+
 
 
 router.post("/get-authorized", authMiddleware, async (req, res) => {
@@ -209,6 +215,121 @@ router.post("/get-authorized", authMiddleware, async (req, res) => {
 });
 
 
+router.post("/wallet", async (req, res) => {
+  try {
+    console.log("📩 Incoming Wallet Payload:", JSON.stringify(req.body, null, 2));
+
+    const {
+      transferId,
+      acctId,
+      currency,
+      amount,
+      type,
+      channel,
+      gameCode,
+      referenceId,
+    } = req.body;
+
+    // ✅ Validate required fields
+    if (!transferId || !acctId || !currency || amount === undefined || !type) {
+      console.error("❌ Missing required fields");
+      return res.status(400).json({ code: 400, msg: "Missing required fields" });
+    }
+
+    // ✅ Ensure user exists
+    const userQ = await pool.query("SELECT id, balance, currency FROM users WHERE id = $1", [acctId]);
+    if (!userQ.rows.length) {
+      console.error(`❌ User not found: ${acctId}`);
+      return res.json({ code: 404, msg: "User not found", balance: 0 });
+    }
+
+    let user = userQ.rows[0];
+    let balance = parseFloat(user.balance);
+
+    // ✅ Ensure transactions table exists for idempotency
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fs_transactions (
+        id SERIAL PRIMARY KEY,
+        transfer_id VARCHAR(100) UNIQUE,
+        acct_id INT NOT NULL,
+        type INT NOT NULL,
+        amount NUMERIC NOT NULL,
+        balance_after NUMERIC NOT NULL,
+        game_code VARCHAR(50),
+        reference_id VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // ✅ Check idempotency (if transfer already processed)
+    const existing = await pool.query(
+      "SELECT * FROM fs_transactions WHERE transfer_id = $1",
+      [transferId]
+    );
+    if (existing.rows.length) {
+      console.warn(`⚠️ Duplicate transferId ${transferId}, returning existing result`);
+      return res.json({
+        transferId,
+        acctId,
+        balance: existing.rows[0].balance_after,
+        code: 0,
+        msg: "success (duplicate ignored)",
+      });
+    }
+
+    // ✅ Process type
+    if (type === 1) {
+      // Place bet
+      if (balance < amount) {
+        console.warn("⚠️ Insufficient funds");
+        return res.json({ code: 402, msg: "Insufficient funds", balance });
+      }
+      balance -= amount;
+    } else if (type === 2) {
+      // Cancel bet (refund)
+      balance += amount;
+    } else if (type === 4) {
+      // Payout (credit winnings)
+      balance += amount;
+    } else {
+      console.error("❌ Unknown transfer type:", type);
+      return res.status(400).json({ code: 400, msg: "Unknown transfer type" });
+    }
+
+    // ✅ Update user balance
+    await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
+
+    // ✅ Save transaction
+    await pool.query(
+      `INSERT INTO fs_transactions 
+       (transfer_id, acct_id, type, amount, balance_after, game_code, reference_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [transferId, acctId, type, amount, balance, gameCode || null, referenceId || null]
+    );
+
+    console.log(`✅ Transfer processed: ${transferId}, new balance=${balance}`);
+
+    // ✅ Respond back to FastSpin
+    return res.json({
+      transferId,
+      acctId,
+      balance,
+      code: 0,
+      msg: "success",
+    });
+
+  } catch (err) {
+    console.error("❌ Wallet error:", err);
+    return res.status(500).json({ code: 500, msg: "Wallet server error" });
+  }
+});
+
+
+
+
+
+
+
 
 
 
@@ -245,147 +366,7 @@ function verifyFSDigest(req, res, next) {
   }
 }
 
-// backend/routes/games.js (add this after your launch-game route)
-router.post("/wallet", async (req, res) => {
-  try {
-    console.log("📩 Incoming Wallet Payload:", req.body);
 
-    const {
-      api,                // "getBalance" | "debit" | "credit" | "rollback"
-      merchantCode,
-      token,
-      serialNo,
-      acctInfo,
-      amount,
-      digest,
-    } = req.body;
-
-    // 1. Verify digest
-    const expectedDigest = createDigest(req.body, process.env.FASTSPIN_SECRET);
-    if (digest !== expectedDigest) {
-      return res.status(400).json({ code: 401, msg: "Invalid digest" });
-    }
-
-    // 2. Validate acctInfo
-    if (!acctInfo || !acctInfo.acctId) {
-      return res.status(400).json({ code: 400, msg: "Missing acctInfo" });
-    }
-
-    const acctId = acctInfo.acctId;
-
-    // 3. Fetch user
-    const q = await pool.query("SELECT id, balance FROM users WHERE id = $1", [acctId]);
-    if (!q.rows.length) {
-      return res.json({ code: 404, msg: "User not found", balance: 0 });
-    }
-    let balance = parseFloat(q.rows[0].balance);
-
-    // 4. Process API request
-    if (api === "getBalance") {
-      return res.json({ code: 0, msg: "success", balance });
-    }
-
-    if (api === "debit") {
-      if (balance < amount) {
-        return res.json({ code: 402, msg: "Insufficient funds", balance });
-      }
-      balance -= amount;
-      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
-      await pool.query(
-        `INSERT INTO transactions (user_id, type, amount, balance_after, description, serial_no) 
-         VALUES ($1, 'debit', $2, $3, 'FastSpin bet placed', $4)`,
-        [acctId, amount, balance, serialNo]
-      );
-      return res.json({ code: 0, msg: "success", balance });
-    }
-
-    if (api === "credit") {
-      balance += amount;
-      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
-      await pool.query(
-        `INSERT INTO transactions (user_id, type, amount, balance_after, description, serial_no) 
-         VALUES ($1, 'credit', $2, $3, 'FastSpin payout', $4)`,
-        [acctId, amount, balance, serialNo]
-      );
-      return res.json({ code: 0, msg: "success", balance });
-    }
-
-    if (api === "rollback") {
-      // rollback = reverse a debit using serialNo
-      const tx = await pool.query(
-        "SELECT * FROM transactions WHERE serial_no = $1 AND type = 'debit'",
-        [serialNo]
-      );
-      if (!tx.rows.length) {
-        return res.json({ code: 404, msg: "No transaction to rollback" });
-      }
-      balance += parseFloat(tx.rows[0].amount);
-      await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
-      await pool.query(
-        `INSERT INTO transactions (user_id, type, amount, balance_after, description, serial_no) 
-         VALUES ($1, 'rollback', $2, $3, 'Rollback bet', $4)`,
-        [acctId, tx.rows[0].amount, balance, serialNo]
-      );
-      return res.json({ code: 0, msg: "rollback success", balance });
-    }
-
-    return res.status(400).json({ code: 400, msg: "Unknown API" });
-  } catch (err) {
-    console.error("❌ Wallet error:", err);
-    res.status(500).json({ code: 500, msg: "Wallet server error" });
-  }
-});
-
-
-
-// router.post("/wallet", async (req, res) => {
-//   try {
-//     const { api, acctId, amount, serialNo, token, merchantCode, digest } = req.body;
-
-//     // 1. Verify digest
-//     const expected = createDigest(merchantCode, token, process.env.FASTSPIN_SECRET, serialNo);
-//     if (digest !== expected) {
-//       return res.status(400).json({ code: 401, msg: "Invalid digest" });
-//     }
-
-//     // 2. Fetch user
-//     const q = await pool.query("SELECT id, balance FROM users WHERE id = $1", [acctId]);
-//     if (!q.rows.length) {
-//       return res.json({ code: 404, msg: "User not found", balance: 0 });
-//     }
-//     let balance = parseFloat(q.rows[0].balance);
-
-//     // 3. Handle operation
-//     if (api === "getBalance") {
-//       return res.json({ code: 0, msg: "success", balance });
-//     }
-
-//     if (api === "debit") {
-//       if (balance < amount) {
-//         return res.json({ code: 402, msg: "Insufficient funds", balance });
-//       }
-//       balance -= amount;
-//       await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
-//       return res.json({ code: 0, msg: "success", balance });
-//     }
-
-//     if (api === "credit") {
-//       balance += amount;
-//       await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [balance, acctId]);
-//       return res.json({ code: 0, msg: "success", balance });
-//     }
-
-//     if (api === "rollback") {
-//       // optional: handle rollback logic
-//       return res.json({ code: 0, msg: "rollback success", balance });
-//     }
-
-//     return res.status(400).json({ code: 400, msg: "Unknown API" });
-//   } catch (err) {
-//     console.error("❌ Wallet error:", err);
-//     res.status(500).json({ code: 500, msg: "Wallet server error" });
-//   }
-// });
 
 
 
