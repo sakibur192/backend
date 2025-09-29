@@ -7,7 +7,6 @@ const router = express.Router();
 const md5 = require("md5"); 
 const { v4: uuidv4 } = require("uuid");
 
-
 require('dotenv').config();
 
 // === CONFIG ===
@@ -215,11 +214,40 @@ router.post("/get-authorized", authMiddleware, async (req, res) => {
 });
 
 
+
+
+// ✅ Verify digest
+function verifyDigest(body, secretKey, incomingDigest) {
+  const raw = JSON.stringify(body) + secretKey;
+  const calc = md5(raw).toString();
+  return calc === incomingDigest;
+}
+
 router.post("/wallet", async (req, res) => {
   try {
     console.log("📩 Incoming Wallet Payload:", JSON.stringify(req.body, null, 2));
 
+    const headers = req.headers;
+    const incomingDigest = headers["digest"];
+    console.log("🔑 Incoming Digest:", incomingDigest);
+
+    // ✅ Step 1: Verify Digest
+    if (!verifyDigest(req.body, SECRET_KEY, incomingDigest)) {
+      console.error("❌ Digest verification failed!");
+      return res.status(400).json({
+        serialNo: req.body.serialNo || null,
+        merchantCode: req.body.merchantCode || MERCHANT_CODE,
+        acctId: req.body.acctId || null,
+        balance: 0,
+        code: 401,
+        msg: "Invalid digest",
+      });
+    }
+    console.log("✅ Digest verified!");
+
     const {
+      serialNo,
+      merchantCode,
       transferId,
       acctId,
       currency,
@@ -231,22 +259,36 @@ router.post("/wallet", async (req, res) => {
     } = req.body;
 
     // ✅ Validate required fields
-    if (!transferId || !acctId || !currency || amount === undefined || !type) {
-      console.error("❌ Missing required fields");
-      return res.status(400).json({ code: 400, msg: "Missing required fields" });
+    if (!serialNo || !merchantCode || !transferId || !acctId || !currency || amount === undefined || !type) {
+      console.error("❌ Missing required fields:", req.body);
+      return res.status(400).json({
+        serialNo: serialNo || null,
+        merchantCode: merchantCode || MERCHANT_CODE,
+        acctId: acctId || null,
+        balance: 0,
+        code: 400,
+        msg: "Missing required fields",
+      });
     }
 
     // ✅ Ensure user exists
     const userQ = await pool.query("SELECT id, balance, currency FROM users WHERE id = $1", [acctId]);
     if (!userQ.rows.length) {
       console.error(`❌ User not found: ${acctId}`);
-      return res.json({ code: 404, msg: "User not found", balance: 0 });
+      return res.json({
+        serialNo,
+        merchantCode,
+        acctId,
+        balance: 0,
+        code: 404,
+        msg: "User not found",
+      });
     }
 
     let user = userQ.rows[0];
     let balance = parseFloat(user.balance);
 
-    // ✅ Ensure transactions table exists for idempotency
+    // ✅ Ensure transactions table exists
     await pool.query(`
       CREATE TABLE IF NOT EXISTS fs_transactions (
         id SERIAL PRIMARY KEY,
@@ -261,7 +303,7 @@ router.post("/wallet", async (req, res) => {
       );
     `);
 
-    // ✅ Check idempotency (if transfer already processed)
+    // ✅ Check idempotency
     const existing = await pool.query(
       "SELECT * FROM fs_transactions WHERE transfer_id = $1",
       [transferId]
@@ -269,7 +311,8 @@ router.post("/wallet", async (req, res) => {
     if (existing.rows.length) {
       console.warn(`⚠️ Duplicate transferId ${transferId}, returning existing result`);
       return res.json({
-        transferId,
+        serialNo,
+        merchantCode,
         acctId,
         balance: existing.rows[0].balance_after,
         code: 0,
@@ -277,23 +320,28 @@ router.post("/wallet", async (req, res) => {
       });
     }
 
-    // ✅ Process type
+    // ✅ Step 2: Handle transaction types
+    console.log(`⚙️ Processing transaction type=${type}, amount=${amount}, acctId=${acctId}`);
+
     if (type === 1) {
       // Place bet
       if (balance < amount) {
         console.warn("⚠️ Insufficient funds");
-        return res.json({ code: 402, msg: "Insufficient funds", balance });
+        return res.json({ serialNo, merchantCode, acctId, balance, code: 402, msg: "Insufficient funds" });
       }
       balance -= amount;
     } else if (type === 2) {
       // Cancel bet (refund)
+      balance += amount;
+    } else if (type === 3) {
+      // Rollback
       balance += amount;
     } else if (type === 4) {
       // Payout (credit winnings)
       balance += amount;
     } else {
       console.error("❌ Unknown transfer type:", type);
-      return res.status(400).json({ code: 400, msg: "Unknown transfer type" });
+      return res.status(400).json({ serialNo, merchantCode, acctId, balance, code: 400, msg: "Unknown transfer type" });
     }
 
     // ✅ Update user balance
@@ -307,11 +355,12 @@ router.post("/wallet", async (req, res) => {
       [transferId, acctId, type, amount, balance, gameCode || null, referenceId || null]
     );
 
-    console.log(`✅ Transfer processed: ${transferId}, new balance=${balance}`);
+    console.log(`✅ Transfer processed: transferId=${transferId}, new balance=${balance}`);
 
-    // ✅ Respond back to FastSpin
+    // ✅ Respond to FastSpin
     return res.json({
-      transferId,
+      serialNo,
+      merchantCode,
       acctId,
       balance,
       code: 0,
@@ -323,6 +372,7 @@ router.post("/wallet", async (req, res) => {
     return res.status(500).json({ code: 500, msg: "Wallet server error" });
   }
 });
+
 
 
 
