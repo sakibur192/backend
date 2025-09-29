@@ -22,5 +22,6 @@ CREATE TABLE transactions (
     amount NUMERIC(12,2) NOT NULL,
     balance_after NUMERIC(12,2) NOT NULL,
     description TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    transfer_id VARCHAR(100) UNIQUE
 );
