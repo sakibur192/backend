@@ -333,7 +333,7 @@ router.post("/wallet", async (req, res) => {
 
     // ✅ Idempotency check
     const existing = await pool.query(
-      "SELECT * FROM fs_transactions WHERE transfer_id = $1",
+      "SELECT * FROM transactions WHERE transfer_id = $1",
       [transferId]
     );
     if (existing.rows.length) {
