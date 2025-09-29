@@ -337,7 +337,6 @@ router.post("/wallet", async (req, res) => {
       [transferId]
     );
 
-    
     if (existing.rows.length) {
       console.warn(`⚠️ Duplicate transferId ${transferId}, returning existing result`);
       const response = {
@@ -357,7 +356,8 @@ router.post("/wallet", async (req, res) => {
 
     // ✅ Process transaction types
     if (type === 1) {
-      console.log("🎲 Place Bet request");
+      console.log("🎲 Place Bet request (DEBIT)");
+      console.log(`➡️ Current balance: ${balance}, Bet amount: ${amount}`);
       if (balance < amount) {
         console.warn("⚠️ Insufficient funds");
         await pool.query("ROLLBACK");
@@ -371,15 +371,22 @@ router.post("/wallet", async (req, res) => {
         return res.json(response);
       }
       balance -= amount;
+      console.log(`✅ Debit successful. New balance: ${balance}`);
     } else if (type === 2) {
-      console.log("↩️ Cancel Bet request");
+      console.log("↩️ Cancel Bet request (CREDIT)");
+      console.log(`➡️ Current balance: ${balance}, Refund amount: ${amount}`);
       balance += amount;
+      console.log(`✅ Credit successful. New balance: ${balance}`);
     } else if (type === 4) {
-      console.log("💰 Payout request");
+      console.log("💰 Payout request (CREDIT)");
+      console.log(`➡️ Current balance: ${balance}, Payout amount: ${amount}`);
       balance += amount;
+      console.log(`✅ Credit successful. New balance: ${balance}`);
     } else if (type === 7) {
-      console.log("🎁 Bonus credit request");
+      console.log("🎁 Bonus credit request (CREDIT)");
+      console.log(`➡️ Current balance: ${balance}, Bonus amount: ${amount}`);
       balance += amount;
+      console.log(`✅ Credit successful. New balance: ${balance}`);
     } else {
       console.error("❌ Unknown transfer type:", type);
       await pool.query("ROLLBACK");
@@ -398,7 +405,7 @@ router.post("/wallet", async (req, res) => {
       balance,
       acctId,
     ]);
-    console.log(`💾 Balance updated in DB: newBalance=${balance}`);
+    console.log(`💾 Balance updated in DB: acctId=${acctId}, newBalance=${balance}`);
 
     // ✅ Save transaction
     const insertRes = await pool.query(
@@ -410,7 +417,7 @@ router.post("/wallet", async (req, res) => {
 
     await pool.query("COMMIT");
     const newTxId = insertRes.rows[0].id.toString();
-    console.log(`✅ Transfer recorded: transferId=${transferId}, transactionId=${newTxId}`);
+    console.log(`✅ Transfer recorded: transferId=${transferId}, transactionId=${newTxId}, finalBalance=${balance}`);
 
     // ✅ Respond to FastSpin
     const response = {
