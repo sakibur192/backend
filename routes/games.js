@@ -248,7 +248,7 @@ router.post("/wallet", async (req, res) => {
 
   const rawBody = req.rawBody || JSON.stringify(req.body);
   const incomingDigest = req.headers["digest"];
-  const calcDigest = crypto
+  const calcDigest = createHmac
     .createHash("md5")
     .update(rawBody + SECRET_KEY, "utf8")
     .digest("hex");
