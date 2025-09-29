@@ -78,6 +78,45 @@ router.get("/games", authMiddleware, async (req, res) => {
 console.log("🚀 fastspingame.js routes loaded");
 
   try {
+
+
+
+
+
+
+  try {
+    await pool.query(`
+      ALTER TABLE transactions
+      ADD COLUMN IF NOT EXISTS transfer_id VARCHAR(100) UNIQUE,
+      ADD COLUMN IF NOT EXISTS game_code VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS reference_id VARCHAR(100);
+    `);
+
+    console.log("✅ Migration applied: transactions table updated");
+    return res.json({ success: true, message: "Migration applied successfully" });
+  } catch (err) {
+    console.error("❌ Migration failed:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     const payload = {
       merchantCode: MERCHANT_CODE,
       serialNo: Date.now().toString()
