@@ -222,15 +222,7 @@ router.post("/get-authorized", authMiddleware, async (req, res) => {
 
 
 // --- Digest verification helper ---
-function verifyDigest(rawBody, secretKey, incomingDigest) {
-  const calc = crypto
-    .createHash("md5")
-    .update(rawBody + secretKey, "utf8")
-    .digest("hex");
-  return calc === incomingDigest;
-}
 
-const crypto = require("crypto");
 
 function verifyDigest(rawBody, secretKey, incomingDigest) {
   const calc = crypto
@@ -248,7 +240,7 @@ router.post("/wallet", async (req, res) => {
 
   const rawBody = req.rawBody || JSON.stringify(req.body);
   const incomingDigest = req.headers["digest"];
-  const calcDigest = createHmac
+  const calcDigest = crypto
     .createHash("md5")
     .update(rawBody + SECRET_KEY, "utf8")
     .digest("hex");
@@ -447,7 +439,6 @@ router.post("/wallet", async (req, res) => {
     return res.status(500).json({ code: 500, msg: "Wallet server error" });
   }
 });
-
 
 
 
