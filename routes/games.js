@@ -400,7 +400,7 @@ router.post("/wallet", async (req, res) => {
 
     // ✅ Save transaction
     const insertRes = await pool.query(
-      `INSERT INTO fs_transactions 
+      `INSERT INTO transactions 
        (transfer_id, acct_id, type, amount, balance_after, game_code, reference_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [transferId, acctId, type, amount, balance, gameCode || null, referenceId || null]
