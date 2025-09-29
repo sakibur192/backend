@@ -306,7 +306,7 @@ router.post("/wallet", async (req, res) => {
           userName: `Player_${acctId}`,
           currency: dbCurrency,
           acctId: String(acctId),
-          balance: Number(balance),
+          balance: Number(balance.toFixed(9)), // ✅ 9-decimal precision
         },
         merchantCode: "CASINO1",
         msg: "success",
@@ -341,7 +341,8 @@ router.post("/wallet", async (req, res) => {
       console.warn(`⚠️ Duplicate transferId ${transferId}, returning existing result`);
       const response = {
         transactionId: existing.rows[0].id.toString(),
-        afterBalance: Number(existing.rows[0].balance_after),
+        afterBalance: Number(existing.rows[0].balance_after).toFixed(9), // ✅ 9-decimal precision
+        acctId: String(acctId), // ✅ echo acctId
         merchantCode: "CASINO1",
         msg: "success (duplicate ignored)",
         code: 0,
@@ -422,7 +423,8 @@ router.post("/wallet", async (req, res) => {
     // ✅ Respond to FastSpin
     const response = {
       transactionId: newTxId,
-      afterBalance: Number(balance),
+      afterBalance: Number(balance.toFixed(9)), // ✅ 9-decimal precision
+      acctId: String(acctId),                  // ✅ echo acctId
       merchantCode: "CASINO1",
       msg: "success",
       code: 0,
