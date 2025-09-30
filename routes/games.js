@@ -277,6 +277,16 @@ router.post("/wallet", async (req, res) => {
     referenceId,
   } = req.body;
 
+ if (!transferId && type === undefined) {
+    console.log("👉 Detected BALANCE CHECK request");
+  } else {
+    console.log("👉 Detected TRANSFER request");
+    console.log(`   ➡️ type=${type}, transferId=${transferId}, amount=${amount}, gameCode=${gameCode}, referenceId=${referenceId}`);
+  }
+
+
+
+
   try {
     // ✅ Ensure user exists
     const userQ = await pool.query(
