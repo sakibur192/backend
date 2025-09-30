@@ -238,7 +238,6 @@ function verifyDigest(rawBody, secretKey, incomingDigest) {
 
 
 
-
 router.post("/wallet", async (req, res) => {
   console.log("===============================================");
   console.log("📩 Incoming Wallet Request at", new Date().toISOString());
@@ -259,7 +258,7 @@ router.post("/wallet", async (req, res) => {
     console.error("❌ Digest mismatch!");
     const response = {
       serialNo: req.body.serialNo || uuidv4(),
-      merchantCode: "CASINO1",
+      merchantCode: MERCHANT_CODE,
       code: 401,
       msg: "Invalid digest",
     };
@@ -289,10 +288,11 @@ router.post("/wallet", async (req, res) => {
       console.warn(`❌ User not found: acctId=${acctId}`);
       const response = {
         serialNo,
-        merchantCode: "CASINO1",
+        merchantCode: MERCHANT_CODE,
         acctId: String(acctId),
         code: 404,
         msg: "User not found",
+        balance: 0.000000000,
       };
       console.log("📤 Responding (User not found):", JSON.stringify(response));
       return res.json(response);
@@ -310,16 +310,16 @@ router.post("/wallet", async (req, res) => {
     if (!transferId && type === undefined) {
       console.log("🔍 Detected Balance Check Request");
       const response = {
+        serialNo,
+        merchantCode: MERCHANT_CODE,
         acctInfo: {
+          acctId: String(acctId),
           userName: `Player_${acctId}`,
           currency: dbCurrency,
-          acctId: String(acctId),
           balance: Number(balance.toFixed(9)),
         },
-        merchantCode: "CASINO1",
-        msg: "success",
         code: 0,
-        serialNo,
+        msg: "success",
       };
       console.log("📤 Responding (Balance Check):", JSON.stringify(response));
       res.setHeader("Content-Type", "application/json; charset=UTF-8");
@@ -331,7 +331,7 @@ router.post("/wallet", async (req, res) => {
       console.error("❌ Missing required fields for transfer:", req.body);
       const response = {
         serialNo,
-        merchantCode: "CASINO1",
+        merchantCode: MERCHANT_CODE,
         acctId: String(acctId),
         code: 400,
         msg: "Missing required fields for transfer",
@@ -349,13 +349,12 @@ router.post("/wallet", async (req, res) => {
     if (existing.rows.length) {
       console.warn(`⚠️ Duplicate transferId ${transferId}, returning existing result`);
       const response = {
-        transactionId: existing.rows[0].id.toString(),
-        afterBalance: Number(existing.rows[0].balance_after).toFixed(9),
-        acctId: String(acctId),
-        merchantCode: "CASINO1",
-        msg: "success (duplicate ignored)",
-        code: 0,
         serialNo,
+        merchantCode: MERCHANT_CODE,
+        acctId: String(acctId),
+        balance: Number(existing.rows[0].balance_after).toFixed(9),
+        code: 0,
+        msg: "success (duplicate ignored)",
       };
       console.log("📤 Responding (Duplicate):", JSON.stringify(response));
       return res.json(response);
@@ -374,34 +373,34 @@ router.post("/wallet", async (req, res) => {
         await pool.query("ROLLBACK");
         const response = {
           serialNo,
-          merchantCode: "CASINO1",
+          merchantCode: MERCHANT_CODE,
           acctId: String(acctId),
           code: 402,
           msg: "Insufficient funds",
+          balance: Number(balance.toFixed(9)),
         };
         console.log("📤 Responding (Insufficient funds):", JSON.stringify(response));
         return res.json(response);
       }
       balance -= amount;
-      console.log(`✅ Debit successful. Old balance=${user.balance}, New balance=${balance}`);
     } else if (type === 2) {
       console.log("↩️ Cancel Bet request (CREDIT)");
       balance += amount;
-      console.log(`✅ Credit successful. Old balance=${user.balance}, New balance=${balance}`);
+    } else if (type === 3) {
+      console.log("⏪ Rollback Bet request (CREDIT)");
+      balance += amount;
     } else if (type === 4) {
       console.log("💰 Payout request (CREDIT)");
       balance += amount;
-      console.log(`✅ Credit successful. Old balance=${user.balance}, New balance=${balance}`);
     } else if (type === 7) {
       console.log("🎁 Bonus credit request (CREDIT)");
       balance += amount;
-      console.log(`✅ Credit successful. Old balance=${user.balance}, New balance=${balance}`);
     } else {
       console.error("❌ Unknown transfer type:", type);
       await pool.query("ROLLBACK");
       const response = {
         serialNo,
-        merchantCode: "CASINO1",
+        merchantCode: MERCHANT_CODE,
         acctId: String(acctId),
         code: 400,
         msg: "Unknown transfer type",
@@ -434,13 +433,12 @@ router.post("/wallet", async (req, res) => {
 
     // ✅ Respond to FastSpin
     const response = {
-      transactionId: newTxId,
-      afterBalance: Number(balance.toFixed(9)),
-      acctId: String(acctId),
-      merchantCode: "CASINO1",
-      msg: "success",
-      code: 0,
       serialNo,
+      merchantCode: MERCHANT_CODE,
+      acctId: String(acctId),
+      balance: Number(balance.toFixed(9)),
+      code: 0,
+      msg: "success",
     };
 
     console.log("📤 Responding (Transfer):", JSON.stringify(response));
