@@ -362,7 +362,7 @@ router.post("/wallet", async (req, res) => {
       res.setHeader("Content-Type", "application/json; charset=UTF-8");
       return res.json(response);
     }
-
+  console.log("📤 Responding (Balance Check):",req.body);
     // ✅ CASE 2: Transfer
     if (!transferId || !currency || amount === undefined || !type) {
       console.error("❌ Missing required fields for transfer:", req.body);
