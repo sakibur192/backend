@@ -230,11 +230,16 @@ router.post("/get-authorized", authMiddleware, async (req, res) => {
 router.post("/wallet-database", async (req, res) => {
   try {
     await pool.query(`
-   CREATE TABLE IF NOT EXISTS fs_wallet_logs (
-  id SERIAL PRIMARY KEY,
-  created_at TIMESTAMP DEFAULT NOW(),
-  headers JSONB,
-  body JSONB
+      CREATE TABLE IF NOT EXISTS fs_transactions (
+        id SERIAL PRIMARY KEY,
+        transfer_id VARCHAR(100) UNIQUE NOT NULL,
+        acct_id INT NOT NULL,
+        type INT NOT NULL,                -- 1=bet, 2=cancel, 3=rollback, 4=payout, 7=bonus
+        amount NUMERIC(18,9) NOT NULL,
+        balance_after NUMERIC(18,9) NOT NULL,
+        game_code VARCHAR(50),
+        reference_id VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW()
       );
     `);
 
@@ -245,6 +250,24 @@ router.post("/wallet-database", async (req, res) => {
   }
 });
 
+// ✅ View FastSpin Wallet Logs
+router.get("/wallet/logs", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT id, created_at, headers, body FROM fs_wallet_logs ORDER BY id DESC LIMIT 50"
+    );
+
+    res.setHeader("Content-Type", "application/json; charset=UTF-8");
+    return res.json({
+      code: 0,
+      msg: "success",
+      logs: rows,
+    });
+  } catch (err) {
+    console.error("❌ Failed to fetch fs_wallet_logs:", err.message);
+    return res.status(500).json({ code: 500, msg: "Failed to fetch logs" });
+  }
+});
 
 
 
