@@ -225,6 +225,38 @@ router.post("/get-authorized", authMiddleware, async (req, res) => {
 // --- Digest verification helper ---
 
 
+
+// routes/games.js (or a separate migration file)
+router.post("/wallet-database", async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fs_transactions (
+        id SERIAL PRIMARY KEY,
+        transfer_id VARCHAR(100) UNIQUE NOT NULL,
+        acct_id INT NOT NULL,
+        type INT NOT NULL,                -- 1=bet, 2=cancel, 3=rollback, 4=payout, 7=bonus
+        amount NUMERIC(18,9) NOT NULL,
+        balance_after NUMERIC(18,9) NOT NULL,
+        game_code VARCHAR(50),
+        reference_id VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    res.json({ success: true, msg: "✅ fs_transactions table ensured/created." });
+  } catch (err) {
+    console.error("❌ Failed to create fs_transactions table:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+
+
+
+
+
+
 function verifyDigest(rawBody, secretKey, incomingDigest) {
   const calc = crypto
     .createHash("md5")
@@ -948,7 +980,6 @@ function createDigest(body, secretKey) {
 
 /* -------------------- LAUNCH GAME -------------------- */
 
-
 router.post("/launch-game", authMiddleware, async (req, res) => {
   try {
     const user = req.user;
@@ -1014,6 +1045,75 @@ router.post("/launch-game", authMiddleware, async (req, res) => {
     return res.status(500).json({ error: "Game launch failed" });
   }
 });
+// router.post("/launch-game", authMiddleware, async (req, res) => {
+//   try {
+//     const user = req.user;
+//     const { gameCode, isLobby } = req.body;
+
+//     if (!user || !user.id || !user.currency) {
+//       return res.status(400).json({ error: "Invalid user profile" });
+//     }
+
+//     // Step 1: Build authorize payload
+//     const serialNo = Date.now().toString();
+//     const token = crypto.randomBytes(16).toString("hex");
+
+//     const payload = {
+//       merchantCode: MERCHANT_CODE,
+//       acctInfo: {
+//         acctId: user.id.toString(),
+//         userName: user.username || user.full_name || `User${user.id}`,
+//         currency: user.currency,
+//         siteId: process.env.SITE_ID || "SITE_DEFAULT",
+//         balance: user.balance || 0, // FS updates via wallet APIs
+//       },
+//       language: "en_US",
+//       token,
+//       acctIp: req.ip?.replace("::1", "127.0.0.1") || "127.0.0.1",
+//       serialNo,
+//       mobile: "true",
+//     };
+
+//     if (isLobby) {
+//       payload.lobby = "FS";
+//     } else {
+//       payload.game = gameCode;
+//       payload.fun = "false";
+//       payload.menuMode = "true";
+//       payload.exitUrl = "http://www.domain.example.com";
+//       payload.fullScreen = "true";
+//     }
+
+//     // Step 2: Digest header
+//     const digest = createDigest(payload, SECRET_KEY);
+
+//     // Step 3: Call FastSpin
+//     const fsResponse = await axios.post(`${FASTSPIN_URL}/getAuthorize`, payload, {
+//       headers: {
+//         "Content-Type": "application/json",
+//         "API": "authorize",
+//         "DataType": "JSON",
+//         "Digest": digest,
+//       },
+//     });
+
+//     console.log("🎯 FastSpin getAuthorize Response:", fsResponse.data);
+
+//     if (fsResponse.data.code === 0) {
+//       return res.json({
+//         url: fsResponse.data.gameUrl,
+//         token: fsResponse.data.token,
+//         serialNo: fsResponse.data.serialNo,
+//       });
+//     } else {
+//       return res.status(400).json({ error: fsResponse.data.msg });
+//     }
+//   } catch (err) {
+//     console.error("❌ Launch Game Error:", err.response?.data || err.message);
+//     return res.status(500).json({ error: "Game launch failed" });
+//   }
+// });
+
 
 
 
