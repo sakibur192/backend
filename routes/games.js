@@ -284,14 +284,12 @@ router.post("/wallet", async (req, res) => {
 
   if (incomingDigest !== calcDigest) {
     console.error("❌ Digest mismatch!");
-    const response = {
+    return res.status(400).json({
       serialNo: req.body.serialNo || uuidv4(),
       merchantCode: MERCHANT_CODE,
       code: 401,
       msg: "Invalid digest",
-    };
-    console.log("📤 Responding (Digest error):", JSON.stringify(response));
-    return res.status(400).json(response);
+    });
   }
 
   const {
@@ -323,16 +321,14 @@ router.post("/wallet", async (req, res) => {
 
     if (!userQ.rows.length) {
       console.warn(`❌ User not found: acctId=${acctId}`);
-      const response = {
+      return res.json({
         serialNo,
         merchantCode: MERCHANT_CODE,
         acctId: String(acctId),
         code: 404,
         msg: "User not found",
-        balance: 0.000000000,
-      };
-      console.log("📤 Responding (User not found):", JSON.stringify(response));
-      return res.json(response);
+        balance: "0.000000000",
+      });
     }
 
     let user = userQ.rows[0];
@@ -345,7 +341,6 @@ router.post("/wallet", async (req, res) => {
 
     // ✅ CASE 1: Balance check
     if (!transferId && type === undefined) {
-      console.log("🔍 Detected Balance Check Request");
       const response = {
         serialNo,
         merchantCode: MERCHANT_CODE,
@@ -353,40 +348,48 @@ router.post("/wallet", async (req, res) => {
           acctId: String(acctId),
           userName: `Player_${acctId}`,
           currency: dbCurrency,
-          balance: Number(balance.toFixed(9)),
+          balance: balance.toFixed(9),
         },
         code: 0,
         msg: "success",
       };
       console.log("📤 Responding (Balance Check):", JSON.stringify(response));
-      res.setHeader("Content-Type", "application/json; charset=UTF-8");
       return res.json(response);
     }
-  console.log("📤 Responding (Balance Check):",req.body);
+
     // ✅ CASE 2: Transfer
     if (!transferId || !currency || amount === undefined || !type) {
       console.error("❌ Missing required fields for transfer:", req.body);
-      const response = {
+      return res.status(400).json({
         serialNo,
         merchantCode: MERCHANT_CODE,
         acctId: String(acctId),
         code: 400,
         msg: "Missing required fields for transfer",
-      };
-      console.log("📤 Responding (Bad request):", JSON.stringify(response));
-      return res.status(400).json(response);
+      });
     }
 
-    // ✅ Idempotency check in fs_transactions
+    // ✅ Ensure table exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fs_transactions (
+        id SERIAL PRIMARY KEY,
+        transfer_id VARCHAR(100) UNIQUE,
+        acct_id INT NOT NULL,
+        type INT NOT NULL,
+        amount NUMERIC NOT NULL,
+        balance_after NUMERIC NOT NULL,
+        game_code VARCHAR(50),
+        reference_id VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // ✅ Idempotency check before BEGIN
     const existing = await pool.query(
       "SELECT * FROM fs_transactions WHERE transfer_id = $1",
       [transferId]
     );
-
     if (existing.rows.length) {
-      console.warn(
-        `⚠️ Duplicate transferId ${transferId}, returning existing result`
-      );
       const response = {
         serialNo,
         merchantCode: MERCHANT_CODE,
@@ -404,108 +407,67 @@ router.post("/wallet", async (req, res) => {
       `⚙️ Processing transfer: type=${type}, amount=${amount}, acctId=${acctId}`
     );
 
-    // ✅ Process transaction types
     if (type === 1) {
       console.log("🎲 Place Bet request (DEBIT)");
       if (balance < amount) {
-        console.warn(
-          `⚠️ Insufficient funds: balance=${balance}, amount=${amount}`
-        );
         await pool.query("ROLLBACK");
-        const response = {
+        return res.json({
           serialNo,
           merchantCode: MERCHANT_CODE,
           acctId: String(acctId),
+          balance: balance.toFixed(9),
           code: 402,
           msg: "Insufficient funds",
-          balance: Number(balance.toFixed(9)),
-        };
-        console.log(
-          "📤 Responding (Insufficient funds):",
-          JSON.stringify(response)
-        );
-        return res.json(response);
+        });
       }
       balance -= amount;
-    } else if (type === 2) {
-      console.log("↩️ Cancel Bet request (CREDIT)");
-      balance += amount;
-    } else if (type === 3) {
-      console.log("⏪ Rollback Bet request (CREDIT)");
-      balance += amount;
-    } else if (type === 4) {
-      console.log("💰 Payout request (CREDIT)");
-      balance += amount;
-    } else if (type === 7) {
-      console.log("🎁 Bonus credit request (CREDIT)");
+    } else if ([2, 3, 4, 7].includes(type)) {
+      console.log("💳 Credit request (type:", type, ")");
       balance += amount;
     } else {
-      console.error("❌ Unknown transfer type:", type);
       await pool.query("ROLLBACK");
-      const response = {
+      return res.status(400).json({
         serialNo,
         merchantCode: MERCHANT_CODE,
         acctId: String(acctId),
         code: 400,
         msg: "Unknown transfer type",
-      };
-      console.log("📤 Responding (Unknown type):", JSON.stringify(response));
-      return res.status(400).json(response);
+      });
     }
 
-    // ✅ Update user balance
     await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [
       balance,
       acctId,
     ]);
-    console.log(
-      `💾 Balance updated in DB: acctId=${acctId}, newBalance=${balance}`
-    );
 
-    // ✅ Save transaction into fs_transactions
-    const insertRes = await pool.query(
+    await pool.query(
       `INSERT INTO fs_transactions 
        (transfer_id, acct_id, type, amount, balance_after, game_code, reference_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [
-        transferId,
-        acctId,
-        type,
-        amount,
-        balance,
-        gameCode || null,
-        referenceId || null,
-      ]
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [transferId, acctId, type, amount, balance, gameCode || null, referenceId || null]
     );
 
     await pool.query("COMMIT");
 
-    const newTxId = insertRes.rows[0].id.toString();
-    console.log(
-      `✅ Transfer recorded: transferId=${transferId}, transactionId=${newTxId}, finalBalance=${balance}`
-    );
-
-    // ✅ Respond to FastSpin
     const response = {
       serialNo,
       merchantCode: MERCHANT_CODE,
       acctId: String(acctId),
-      balance: Number(balance.toFixed(9)),
+      balance: balance.toFixed(9),
       code: 0,
       msg: "success",
     };
-
     console.log("📤 Responding (Transfer):", JSON.stringify(response));
-    res.setHeader("Content-Type", "application/json; charset=UTF-8");
     return res.json(response);
   } catch (err) {
-  console.error("❌ Wallet server error:");
-  console.error("   Message:", err.message);
-  console.error("   Stack:", err.stack);
-  console.error("   Full Error Object:", JSON.stringify(err, null, 2));
-
-  await pool.query("ROLLBACK").catch(() => {});
-  return res.status(500).json({ code: 500, msg: "Wallet server error" });
+    console.error("❌ Wallet server error:", err);
+    await pool.query("ROLLBACK").catch(() => {});
+    return res.status(500).json({
+      serialNo: req.body.serialNo || uuidv4(),
+      merchantCode: MERCHANT_CODE,
+      code: 500,
+      msg: "Wallet server error",
+    });
   }
 });
 
