@@ -948,6 +948,7 @@ function createDigest(body, secretKey) {
 
 /* -------------------- LAUNCH GAME -------------------- */
 
+
 router.post("/launch-game", authMiddleware, async (req, res) => {
   try {
     const user = req.user;
@@ -957,40 +958,37 @@ router.post("/launch-game", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "Invalid user profile" });
     }
 
-    // Step 1: Build authorize payload
     const serialNo = Date.now().toString();
     const token = crypto.randomBytes(16).toString("hex");
 
+    // Base payload
     const payload = {
       merchantCode: MERCHANT_CODE,
       acctInfo: {
         acctId: user.id.toString(),
         userName: user.username || user.full_name || `User${user.id}`,
         currency: user.currency,
-        siteId: process.env.SITE_ID || "SITE_DEFAULT",
-        balance: user.balance || 0, // FS updates via wallet APIs
+        siteId: process.env.SITE_ID || MERCHANT_CODE, // ✅ safer default
       },
       language: "en_US",
       token,
       acctIp: req.ip?.replace("::1", "127.0.0.1") || "127.0.0.1",
       serialNo,
       mobile: "true",
+      fun: "false", // ✅ force always real money mode
     };
 
     if (isLobby) {
       payload.lobby = "FS";
     } else {
       payload.game = gameCode;
-      payload.fun = "false";
       payload.menuMode = "true";
-      payload.exitUrl = "http://www.domain.example.com";
+      payload.exitUrl = process.env.EXIT_URL || "https://yourdomain.com/exit"; // ✅ real domain
       payload.fullScreen = "true";
     }
 
-    // Step 2: Digest header
     const digest = createDigest(payload, SECRET_KEY);
 
-    // Step 3: Call FastSpin
     const fsResponse = await axios.post(`${FASTSPIN_URL}/getAuthorize`, payload, {
       headers: {
         "Content-Type": "application/json",
@@ -1016,7 +1014,6 @@ router.post("/launch-game", authMiddleware, async (req, res) => {
     return res.status(500).json({ error: "Game launch failed" });
   }
 });
-
 
 
 
