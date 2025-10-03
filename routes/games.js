@@ -230,16 +230,11 @@ router.post("/get-authorized", authMiddleware, async (req, res) => {
 router.post("/wallet-database", async (req, res) => {
   try {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS fs_transactions (
-        id SERIAL PRIMARY KEY,
-        transfer_id VARCHAR(100) UNIQUE NOT NULL,
-        acct_id INT NOT NULL,
-        type INT NOT NULL,                -- 1=bet, 2=cancel, 3=rollback, 4=payout, 7=bonus
-        amount NUMERIC(18,9) NOT NULL,
-        balance_after NUMERIC(18,9) NOT NULL,
-        game_code VARCHAR(50),
-        reference_id VARCHAR(100),
-        created_at TIMESTAMP DEFAULT NOW()
+   CREATE TABLE IF NOT EXISTS fs_wallet_logs (
+  id SERIAL PRIMARY KEY,
+  created_at TIMESTAMP DEFAULT NOW(),
+  headers JSONB,
+  body JSONB
       );
     `);
 
@@ -274,6 +269,17 @@ router.post("/wallet", async (req, res) => {
   console.log("📩 Incoming Wallet Request at", new Date().toISOString());
   console.log("Headers:", JSON.stringify(req.headers, null, 2));
   console.log("Body:", JSON.stringify(req.body, null, 2));
+
+
+    try {
+    await pool.query(
+      `INSERT INTO fs_wallet_logs (created_at, headers, body) VALUES (NOW(), $1, $2)`,
+      [JSON.stringify(req.headers), JSON.stringify(req.body)]
+    );
+  } catch (err) {
+    console.error("⚠️ Failed to insert into fs_wallet_logs:", err.message);
+  }
+
 
   // rawBody: some proxies/frameworks provide rawBody; fallback to JSON.stringify(req.body)
   const rawBody = req.rawBody || JSON.stringify(req.body);
