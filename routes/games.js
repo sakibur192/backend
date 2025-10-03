@@ -499,9 +499,13 @@ router.post("/wallet", async (req, res) => {
     res.setHeader("Content-Type", "application/json; charset=UTF-8");
     return res.json(response);
   } catch (err) {
-    console.error("❌ Wallet server error:", err);
-    await pool.query("ROLLBACK").catch(() => {});
-    return res.status(500).json({ code: 500, msg: "Wallet server error" });
+  console.error("❌ Wallet server error:");
+  console.error("   Message:", err.message);
+  console.error("   Stack:", err.stack);
+  console.error("   Full Error Object:", JSON.stringify(err, null, 2));
+
+  await pool.query("ROLLBACK").catch(() => {});
+  return res.status(500).json({ code: 500, msg: "Wallet server error" });
   }
 });
 
