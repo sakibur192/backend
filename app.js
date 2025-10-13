@@ -20,10 +20,14 @@ app.use(morgan('dev'));
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
 const gameRoutes = require('./routes/games');
+const ppRoutes = require('./routes/pp');
+
+
 
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/fastspin', gameRoutes);
+app.use('/api/pp', ppRoutes);
 
 
 

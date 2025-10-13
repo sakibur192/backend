@@ -1,7 +1,7 @@
 // backend/services/db.js
 const { Pool } = require('pg');
 require('dotenv').config();
-
+//DATABASE_URL=postgresql://gamingdb_l6hs_user:Ji2gbOlCsUtPeOPYmmBO8Kgz9lzsWxwn@dpg-d36po80dl3ps739o7tcg-a/gamingdb_l6hs
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
