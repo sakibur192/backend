@@ -3,60 +3,74 @@ const axios = require("axios");
 const crypto = require("crypto");
 const router = express.Router();
 
-// Pragmatic Play API credentials
 const API_URL = "https://api.prerelease-env.biz/IntegrationService/v3/http/CasinoGameAPI/getCasinoGames/";
-const SECURE_LOGIN = "tlbt_itelbet"; 
+const SECURE_LOGIN = "tlbt_itelbet";
 const OPERATOR_SECRET = "hmednN6zovHK7KuE";
 
-/**
- * Generate MD5 hash for authentication
- * hash = md5(secureLogin + OPERATOR_SECRET)
- */
-function generateHash() {
-    return crypto.createHash("md5").update(SECURE_LOGIN + OPERATOR_SECRET).digest("hex");
+// ✅ Pragmatic Play hash generation as per Section 19.1
+function generatePPHash(params) {
+  // 1️⃣ Sort all keys alphabetically
+  const sortedKeys = Object.keys(params).sort();
+
+  // 2️⃣ Build query string
+  const queryString = sortedKeys
+    .filter(key => params[key] !== null && params[key] !== "")
+    .map(key => `${key}=${params[key]}`)
+    .join("&");
+
+  // 3️⃣ Append secret key
+  const stringToHash = queryString + OPERATOR_SECRET;
+
+  // 4️⃣ Generate MD5 hash
+  return crypto.createHash("md5").update(stringToHash).digest("hex");
 }
 
-/**
- * GET Casino Games
- * POST /api/pp/getCasinoGames
- */
+// 🎮 Fetch Casino Games
 router.post("/getCasinoGames", async (req, res) => {
-    try {
-        const hash = generateHash();
+  try {
+    const requestParams = {
+      secureLogin: SECURE_LOGIN,
+      options: "GetFeatures,GetFrbDetails,GetLines,GetDataTypes,GetFcDetails",
+    };
 
-        // Prepare POST body
-        const params = new URLSearchParams({
-            secureLogin: SECURE_LOGIN,
-            hash: hash,
-            options: "GetFeatures,GetFrbDetails,GetLines,GetDataTypes,GetFcDetails,GetStudio"
-        });
+    // ✅ Generate hash as per doc rule
+    const hash = generatePPHash(requestParams);
 
-        // Send POST request to Pragmatic Play
-        const response = await axios.post(API_URL, params.toString(), {
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            timeout: 15000 // 15 sec timeout
-        });
+    const bodyParams = new URLSearchParams({
+      ...requestParams,
+      hash: hash,
+    });
 
-        const data = response.data;
+    const response = await axios.post(API_URL, bodyParams.toString(), {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
 
-        if (data.error === "0") {
-            // ✅ Successfully retrieved games
-            console.log(`Retrieved ${data.gameList.length} games`);
-            res.json({
-                error: 0,
-                description: "Success",
-                games: data.gameList
-            });
-        } else {
-            // ❌ Error from PP API
-            console.error("Pragmatic Play API error:", data.description);
-            res.status(400).json({ error: data.error, description: data.description });
-        }
+    const data = response.data;
 
-    } catch (error) {
-        console.error("Request failed:", error.message);
-        res.status(500).json({ error: 500, description: "Failed to fetch games", details: error.message });
+    if (data.error === "0") {
+      console.log(`✅ Retrieved ${data.gameList?.length || 0} games`);
+      res.json({
+        success: true,
+        description: data.description || "Success",
+        total: data.gameList?.length || 0,
+        games: data.gameList || [],
+      });
+    } else {
+      console.error("❌ API Error:", data.description);
+      res.status(400).json({
+        success: false,
+        error: data.error,
+        description: data.description,
+      });
     }
+  } catch (error) {
+    console.error("⚠️ Request failed:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      details: error.message,
+    });
+  }
 });
 
 module.exports = router;
