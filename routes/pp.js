@@ -77,7 +77,7 @@ router.post("/getCasinoGames", async (req, res) => {
 
 function calculateHash(params, secret) {
   const sortedKeys = Object.keys(params)
-    .filter(k => params[k] !== undefined && params[k] !== null)
+    .filter(k => k !== "hash" && params[k] !== undefined && params[k] !== null)
     .sort();
   const paramString = sortedKeys.map(k => `${k}=${params[k]}`).join("&");
   return crypto.createHash("md5").update(paramString + secret).digest("hex");
@@ -88,10 +88,10 @@ function generateToken() {
 }
 
 // =====================
-// Player Database (in-memory for mock)
+// MOCK DATABASE
 // =====================
 const playersDB = {
-  "player123": {
+  player123: {
     userId: "421",
     currency: "BDT",
     cash: 99999.99,
@@ -106,8 +106,12 @@ const playersDB = {
   }
 };
 
+// Global transaction caches
+global.betHistory = {};
+global.resultHistory = {};
+
 // =====================
-// /getGameUrl
+// 🔹 /getGameUrl
 // =====================
 router.post("/getGameUrl", async (req, res) => {
   try {
@@ -121,15 +125,24 @@ router.post("/getGameUrl", async (req, res) => {
       platform = "WEB",
       language = "en",
       playMode = "REAL",
-      country = "US"
+      country = "US",
+      technology = "H5",
+      cashierUrl = "",
+      lobbyUrl = "",
+      promo = "n",
+      stylename = SECURE_LOGIN
     } = req.body;
 
-    if (!gameId || !playerId) return res.status(400).json({ error: 14, description: "Missing required field" });
+    if (!gameId || !playerId) {
+      return res.status(400).json({ error: 14, description: "Missing required field" });
+    }
 
     const player = playersDB[playerId];
-    if (!player) return res.status(404).json({ error: 1, description: "Player not found" });
+    if (!player) {
+      return res.status(404).json({ error: 1, description: "Player not found" });
+    }
 
-    // Generate one-time token and store in DB
+    // 🔐 Generate token
     const token = generateToken();
     player.token = token;
 
@@ -141,12 +154,12 @@ router.post("/getGameUrl", async (req, res) => {
       externalPlayerId: playerId,
       currency,
       platform,
-      technology: "H5",
-      stylename: SECURE_LOGIN,
-      cashierUrl: "",
-      lobbyUrl: "",
+      technology,
+      stylename,
+      cashierUrl,
+      lobbyUrl,
       country,
-      promo: "n",
+      promo,
       playMode
     };
 
@@ -154,7 +167,6 @@ router.post("/getGameUrl", async (req, res) => {
     console.log("🔐 Generated hash:", hash);
 
     const bodyParams = new URLSearchParams({ ...requestParams, hash }).toString();
-    console.log("🧾 POST Body (URL encoded):", bodyParams);
 
     const response = await axios.post(API_URL2, bodyParams, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -181,7 +193,7 @@ router.post("/getGameUrl", async (req, res) => {
 });
 
 // =====================
-// /authenticate
+// 🔹 /authenticate
 // =====================
 router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) => {
   console.log("===== /authenticate CALLED =====");
@@ -196,10 +208,14 @@ router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) 
   const calculatedHash = calculateHash({ token, providerId, ...optional }, SECRET_KEY);
   console.log("🔐 Calculated hash:", calculatedHash);
 
-  if (calculatedHash !== hash) return res.json({ error: 2, description: "Invalid hash or credentials" });
+  if (calculatedHash !== hash) {
+    return res.json({ error: 2, description: "Invalid hash or credentials" });
+  }
 
   const player = Object.values(playersDB).find(p => p.token === token);
-  if (!player) return res.json({ error: 1, description: "Player not found or token invalid" });
+  if (!player) {
+    return res.json({ error: 1, description: "Player not found or token invalid" });
+  }
 
   res.json({
     userId: player.userId,
@@ -217,18 +233,25 @@ router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) 
 });
 
 // =====================
-// /balance
+// 🔹 /balance
 // =====================
 router.post("/balance", express.urlencoded({ extended: true }), (req, res) => {
+  console.log("===== /balance CALLED =====");
   const { hash, providerId, userId, token } = req.body;
 
-  if (!hash || !providerId || !userId) return res.json({ error: 7, description: "Missing required parameter(s)" });
+  if (!hash || !providerId || !userId) {
+    return res.json({ error: 7, description: "Missing required parameter(s)" });
+  }
 
   const calculatedHash = calculateHash({ providerId, userId, token }, SECRET_KEY);
-  if (calculatedHash !== hash) return res.json({ error: 2, description: "Invalid hash" });
+  if (calculatedHash !== hash) {
+    return res.json({ error: 2, description: "Invalid hash" });
+  }
 
   const player = Object.values(playersDB).find(p => p.userId === userId);
-  if (!player) return res.json({ error: 1, description: "Player not found" });
+  if (!player) {
+    return res.json({ error: 1, description: "Player not found" });
+  }
 
   res.json({
     currency: player.currency,
@@ -241,10 +264,10 @@ router.post("/balance", express.urlencoded({ extended: true }), (req, res) => {
 });
 
 // =====================
-// /bet
+// 🔹 /bet
 // =====================
 router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
-  console.log("\n===== 🎯 /bet.html CALLED =====");
+  console.log("\n===== 🎯 /bet CALLED =====");
   console.log("📩 Raw Request Body:", req.body);
 
   const {
@@ -256,6 +279,7 @@ router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
     amount,
     reference,
     timestamp,
+    token,
     roundDetails,
     bonusCode,
     platform,
@@ -263,111 +287,106 @@ router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
     jackpotContribution,
     jackpotDetails,
     jackpotId,
-    token,
     ipAddress
   } = req.body;
 
-  // 1️⃣ Validate required fields
   if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp) {
-    console.error("❌ Missing required parameter(s)");
     return res.json({ error: 7, description: "Missing required parameter(s)" });
   }
 
-  // 2️⃣ Calculate hash
-  const hashParams = { providerId, userId, token, gameId, roundId, amount, reference, timestamp };
+  const hashParams = {
+    providerId, userId, token, gameId, roundId,
+    amount, reference, timestamp
+  };
+
   const calculatedHash = calculateHash(hashParams, SECRET_KEY);
   console.log("🔐 Calculated Hash:", calculatedHash);
   console.log("🔍 Provided Hash:", hash);
 
   if (calculatedHash !== hash) {
-    console.error("❌ Invalid hash or credentials mismatch");
     return res.json({ error: 2, description: "Invalid hash" });
   }
 
-  // 3️⃣ Find player
   const player = playersDB[userId];
-  if (!player) {
-    console.error(`❌ Player not found: userId=${userId}`);
-    return res.json({ error: 1, description: "Player not found" });
-  }
+  if (!player) return res.json({ error: 1, description: "Player not found" });
 
-  // 4️⃣ Idempotent check
   if (global.betHistory[reference]) {
-    console.warn(`⚠️ Duplicate bet reference detected: ${reference}. Returning cached response.`);
+    console.log("⚠️ Duplicate bet reference detected. Returning cached response.");
     return res.json(global.betHistory[reference]);
   }
 
-  // 5️⃣ Start transaction logging
-  console.log(`🎮 Game: ${gameId}, Round: ${roundId}, Player: ${userId}`);
-  console.log(`💰 Bet amount: ${amount}, Currency: ${player.currency}`);
-  if (roundDetails) console.log(`📘 Round Details: ${roundDetails}`);
-  if (platform) console.log(`📱 Platform: ${platform}`);
-  if (language) console.log(`🌐 Language: ${language}`);
-  if (bonusCode) console.log(`🎁 Bonus Code: ${bonusCode}`);
-  if (jackpotId) console.log(`💎 Jackpot ID: ${jackpotId}, Contribution: ${jackpotContribution}`);
-  if (ipAddress) console.log(`🌍 Player IP: ${ipAddress}`);
-
-  // 6️⃣ Deduct funds (cash first, then bonus)
+  // Deduct balance
   const betAmount = parseFloat(amount);
-  let remainingAmount = betAmount;
-  let usedPromo = 0;
-
-  if (player.cash >= remainingAmount) {
-    player.cash -= remainingAmount;
+  let usedBonus = 0;
+  if (player.cash >= betAmount) {
+    player.cash -= betAmount;
   } else {
-    remainingAmount -= player.cash;
+    const remaining = betAmount - player.cash;
     player.cash = 0;
-    usedPromo = Math.min(remainingAmount, player.bonus);
-    player.bonus -= usedPromo;
+    usedBonus = Math.min(remaining, player.bonus);
+    player.bonus -= usedBonus;
   }
 
-  console.log(`💳 Updated balances => Cash: ${player.cash}, Bonus: ${player.bonus}, UsedPromo: ${usedPromo}`);
-
-  // 7️⃣ Build response
   const response = {
     transactionId: Date.now(),
     currency: player.currency,
     cash: parseFloat(player.cash.toFixed(2)),
     bonus: parseFloat(player.bonus.toFixed(2)),
-    usedPromo: parseFloat(usedPromo.toFixed(2)),
+    usedPromo: parseFloat(usedBonus.toFixed(2)),
     error: 0,
-    description: "Success",
+    description: "Success"
   };
 
-  // 8️⃣ Cache transaction for idempotency
   global.betHistory[reference] = response;
-  console.log("🧾 Transaction saved:", response);
+  console.log("✅ Bet processed:", response);
 
-  // 9️⃣ Return final JSON
   res.json(response);
 });
+
 // =====================
-// /result
+// 🔹 /result
 // =====================
 router.post("/result", express.urlencoded({ extended: true }), (req, res) => {
-  const { hash, providerId, userId, token, gameId, roundId, amount, reference, timestamp } = req.body;
+  console.log("===== /result CALLED =====");
+  const {
+    hash, providerId, userId, token, gameId, roundId,
+    amount, reference, timestamp
+  } = req.body;
 
   if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp) {
     return res.json({ error: 7, description: "Missing required parameter(s)" });
   }
 
-  const calculatedHash = calculateHash({ providerId, userId, token, gameId, roundId, amount, reference, timestamp }, SECRET_KEY);
-  if (calculatedHash !== hash) return res.json({ error: 2, description: "Invalid hash" });
+  const calculatedHash = calculateHash(
+    { providerId, userId, token, gameId, roundId, amount, reference, timestamp },
+    SECRET_KEY
+  );
 
-  const player = Object.values(playersDB).find(p => p.userId === userId);
+  if (calculatedHash !== hash) {
+    return res.json({ error: 2, description: "Invalid hash" });
+  }
+
+  const player = playersDB[userId];
   if (!player) return res.json({ error: 1, description: "Player not found" });
 
-  if (!global.resultHistory) global.resultHistory = {};
   if (global.resultHistory[reference]) return res.json(global.resultHistory[reference]);
 
   player.cash += parseFloat(amount);
 
-  const response = { transactionId: Date.now(), currency: player.currency, cash: player.cash, bonus: player.bonus, error: 0, description: "Success" };
+  const response = {
+    transactionId: Date.now(),
+    currency: player.currency,
+    cash: player.cash,
+    bonus: player.bonus,
+    error: 0,
+    description: "Success"
+  };
+
   global.resultHistory[reference] = response;
+  console.log("🏁 Result processed:", response);
 
   res.json(response);
 });
-
 
 
 
