@@ -243,7 +243,7 @@ router.post("/balance", express.urlencoded({ extended: true }), (req, res) => {
 // =====================
 // /bet
 // =====================
-router.post("/bet.html", express.urlencoded({ extended: true }), (req, res) => {
+router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
   console.log("\n===== 🎯 /bet.html CALLED =====");
   console.log("📩 Raw Request Body:", req.body);
 
