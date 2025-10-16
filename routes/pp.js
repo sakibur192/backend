@@ -230,7 +230,7 @@ const playersDB = {
     promoEligible: true,
     aamsTicket: "aams123",
     aamsSessionId: "sess456",
-    token: "player123-session-token",
+    token: generateToken(),
     ipAddress: "192.168.1.10"
   }
 };
