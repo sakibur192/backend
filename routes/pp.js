@@ -243,25 +243,73 @@ router.post("/balance", express.urlencoded({ extended: true }), (req, res) => {
 // =====================
 // /bet
 // =====================
-router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
+router.post("/bet.html", express.urlencoded({ extended: true }), (req, res) => {
+  console.log("\n===== 🎯 /bet.html CALLED =====");
+  console.log("📩 Raw Request Body:", req.body);
+
   const {
-    hash, providerId, userId, token, gameId, roundId, amount, reference, timestamp
+    hash,
+    providerId,
+    userId,
+    gameId,
+    roundId,
+    amount,
+    reference,
+    timestamp,
+    roundDetails,
+    bonusCode,
+    platform,
+    language,
+    jackpotContribution,
+    jackpotDetails,
+    jackpotId,
+    token,
+    ipAddress
   } = req.body;
 
+  // 1️⃣ Validate required fields
   if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp) {
+    console.error("❌ Missing required parameter(s)");
     return res.json({ error: 7, description: "Missing required parameter(s)" });
   }
 
-  const calculatedHash = calculateHash({ providerId, userId, token, gameId, roundId, amount, reference, timestamp }, SECRET_KEY);
-  if (calculatedHash !== hash) return res.json({ error: 2, description: "Invalid hash" });
+  // 2️⃣ Calculate hash
+  const hashParams = { providerId, userId, token, gameId, roundId, amount, reference, timestamp };
+  const calculatedHash = calculateHash(hashParams, SECRET_KEY);
+  console.log("🔐 Calculated Hash:", calculatedHash);
+  console.log("🔍 Provided Hash:", hash);
 
-  const player = Object.values(playersDB).find(p => p.userId === userId);
-  if (!player) return res.json({ error: 1, description: "Player not found" });
+  if (calculatedHash !== hash) {
+    console.error("❌ Invalid hash or credentials mismatch");
+    return res.json({ error: 2, description: "Invalid hash" });
+  }
 
-  if (!global.betHistory) global.betHistory = {};
-  if (global.betHistory[reference]) return res.json(global.betHistory[reference]);
+  // 3️⃣ Find player
+  const player = playersDB[userId];
+  if (!player) {
+    console.error(`❌ Player not found: userId=${userId}`);
+    return res.json({ error: 1, description: "Player not found" });
+  }
 
-  let remainingAmount = parseFloat(amount);
+  // 4️⃣ Idempotent check
+  if (global.betHistory[reference]) {
+    console.warn(`⚠️ Duplicate bet reference detected: ${reference}. Returning cached response.`);
+    return res.json(global.betHistory[reference]);
+  }
+
+  // 5️⃣ Start transaction logging
+  console.log(`🎮 Game: ${gameId}, Round: ${roundId}, Player: ${userId}`);
+  console.log(`💰 Bet amount: ${amount}, Currency: ${player.currency}`);
+  if (roundDetails) console.log(`📘 Round Details: ${roundDetails}`);
+  if (platform) console.log(`📱 Platform: ${platform}`);
+  if (language) console.log(`🌐 Language: ${language}`);
+  if (bonusCode) console.log(`🎁 Bonus Code: ${bonusCode}`);
+  if (jackpotId) console.log(`💎 Jackpot ID: ${jackpotId}, Contribution: ${jackpotContribution}`);
+  if (ipAddress) console.log(`🌍 Player IP: ${ipAddress}`);
+
+  // 6️⃣ Deduct funds (cash first, then bonus)
+  const betAmount = parseFloat(amount);
+  let remainingAmount = betAmount;
   let usedPromo = 0;
 
   if (player.cash >= remainingAmount) {
@@ -273,12 +321,26 @@ router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
     player.bonus -= usedPromo;
   }
 
-  const response = { transactionId: Date.now(), currency: player.currency, cash: player.cash, bonus: player.bonus, usedPromo, error: 0, description: "Success" };
-  global.betHistory[reference] = response;
+  console.log(`💳 Updated balances => Cash: ${player.cash}, Bonus: ${player.bonus}, UsedPromo: ${usedPromo}`);
 
+  // 7️⃣ Build response
+  const response = {
+    transactionId: Date.now(),
+    currency: player.currency,
+    cash: parseFloat(player.cash.toFixed(2)),
+    bonus: parseFloat(player.bonus.toFixed(2)),
+    usedPromo: parseFloat(usedPromo.toFixed(2)),
+    error: 0,
+    description: "Success",
+  };
+
+  // 8️⃣ Cache transaction for idempotency
+  global.betHistory[reference] = response;
+  console.log("🧾 Transaction saved:", response);
+
+  // 9️⃣ Return final JSON
   res.json(response);
 });
-
 // =====================
 // /result
 // =====================
