@@ -121,6 +121,9 @@ function generateToken() {
  */
 router.post("/getGameUrl", async (req, res) => {
   try {
+    console.log("\n===== /getGameUrl CALLED =====");
+    console.log("📩 Request body:", req.body);
+
     const {
       gameId,
       playerId,
@@ -129,19 +132,21 @@ router.post("/getGameUrl", async (req, res) => {
       language = "en",
       playMode = "REAL",
       country = "US",   // required
-      promo = "n",      // optional promo parameter
+      promo = "n",
       cashierUrl = "",
       lobbyUrl = ""
     } = req.body;
 
     if (!gameId || !playerId) {
+      console.log("❌ Missing required fields: gameId or playerId");
       return res.status(400).json({ error: 14, description: "Required field missing: gameId or playerId" });
     }
 
-    // 1. Generate one-time token
+    // 1️⃣ Generate one-time token
     const token = generateToken();
+    console.log("🆔 Generated token:", token);
 
-    // 2. Prepare all parameters for GameURL API
+    // 2️⃣ Prepare params
     const requestParams = {
       secureLogin: SECURE_LOGIN,
       symbol: gameId,
@@ -151,7 +156,7 @@ router.post("/getGameUrl", async (req, res) => {
       currency,
       platform,
       technology: "H5",
-      stylename: SECURE_LOGIN, // Operator identifier
+      stylename: SECURE_LOGIN,
       cashierUrl,
       lobbyUrl,
       country,
@@ -159,35 +164,50 @@ router.post("/getGameUrl", async (req, res) => {
       playMode
     };
 
-    // 3. Calculate hash
+    console.log("📦 Request params (before hash):", requestParams);
+
+    // 3️⃣ Generate hash
     const hash = generateHash(requestParams);
+    console.log("🔐 Generated hash:", hash);
 
-    // 4. Prepare POST body including hash
+    // 4️⃣ Prepare POST body
     const bodyParams = new URLSearchParams({ ...requestParams, hash }).toString();
+    console.log("🧾 POST Body (URL encoded):", bodyParams);
 
-    // 5. Call Pragmatic Play GameURL API
+    // 5️⃣ Call PP GameURL API
+    console.log("🌍 Sending request to Pragmatic Play:", API_URL2);
     const response = await axios.post(API_URL2, bodyParams, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       timeout: 15000
     });
 
+    console.log("📨 Received response:", response.data);
     const data = response.data;
 
-    // 6. Handle errors according to PP spec
+    // 6️⃣ Handle PP response errors
     if (data.error && data.error !== "0") {
+      console.log("⚠️ PP responded with an error:", data);
       return res.status(400).json({ error: data.error, description: data.description });
     }
 
-    // 7. Return gameURL to frontend
+    // 7️⃣ Return success
+    console.log("✅ Game URL generated successfully:", data.gameURL);
+
     return res.json({
       error: 0,
       description: data.description || "OK",
       gameURL: data.gameURL,
-      token // optional: return token for frontend tracking
+      token
     });
 
   } catch (err) {
-    console.error("GameURL API request failed:", err.message);
+    console.error("💥 GameURL API request failed:", err.message);
+    if (err.response) {
+      console.error("📜 Response status:", err.response.status);
+      console.error("📜 Response data:", err.response.data);
+    } else {
+      console.error("⚠️ No response received:", err);
+    }
     return res.status(500).json({
       error: 1,
       description: "Internal server error: failed to generate game URL",
@@ -195,6 +215,7 @@ router.post("/getGameUrl", async (req, res) => {
     });
   }
 });
+
 
 
 
