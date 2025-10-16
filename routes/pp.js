@@ -167,7 +167,7 @@ router.post("/getGameUrl", async (req, res) => {
     console.log("📦 Request params (before hash):", requestParams);
 
     // 3️⃣ Generate hash
-    const hash = generateHash(requestParams);
+    const hash = generatePPHash(requestParams);
     console.log("🔐 Generated hash:", hash);
 
     // 4️⃣ Prepare POST body
@@ -236,11 +236,7 @@ const playersDB = {
 };
 
 // Helper function to calculate MD5 hash
-function calculateHash(params, secret) {
-  const keys = Object.keys(params).sort();
-  const stringToHash = keys.map(k => `${k}=${params[k] || ""}`).join("&") + secret;
-  return crypto.createHash("md5").update(stringToHash).digest("hex");
-}
+
 
 // POST /authenticate.html
 router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) => {
@@ -272,7 +268,7 @@ router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) 
   }
 
   // Validate hash (include optional fields if present)
-  const calculatedHash = calculateHash(
+  const calculatedHash = generatePPHash(
     { token, providerId, gameId, ipAddress, chosenBalance, launchingType, previousToken },
     SECRET_KEY
   );
