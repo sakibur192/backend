@@ -75,150 +75,21 @@ router.post("/getCasinoGames", async (req, res) => {
 });
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-// Utility: generate MD5 hash according to PP doc
-function generateHash(params) {
-  // 1. Sort all keys alphabetically
-  const sortedKeys = Object.keys(params).sort();
-
-  // 2. Concatenate key=value with &
-  const paramString = sortedKeys
-    .map(key => `${key}=${params[key]}`)
-    .join("&");
-
-  // 3. Append secret key
-  const stringToHash = paramString + OPERATOR_SECRET;
-
-  // 4. Generate MD5 hash
-  return crypto.createHash("md5").update(stringToHash).digest("hex");
+function calculateHash(params, secret) {
+  const sortedKeys = Object.keys(params)
+    .filter(k => params[k] !== undefined && params[k] !== null)
+    .sort();
+  const paramString = sortedKeys.map(k => `${k}=${params[k]}`).join("&");
+  return crypto.createHash("md5").update(paramString + secret).digest("hex");
 }
 
-// Generate one-time token for player (simple example, you can store in DB for validation)
 function generateToken() {
   return crypto.randomBytes(16).toString("hex");
 }
 
-/**
- * POST /pp/getGameUrl
- * Body parameters:
- *  - gameId (symbol)
- *  - playerId (externalPlayerId)
- *  - currency (optional)
- *  - platform (optional)
- *  - language (optional, default 'en')
- *  - playMode (optional, 'REAL' or 'DEMO')
- */
-router.post("/getGameUrl", async (req, res) => {
-  try {
-    console.log("\n===== /getGameUrl CALLED =====");
-    console.log("📩 Request body:", req.body);
-
-    const {
-      gameId,
-      playerId,
-      currency = "USD",
-      platform = "WEB",
-      language = "en",
-      playMode = "REAL",
-      country = "US",   // required
-      promo = "n",
-      cashierUrl = "",
-      lobbyUrl = ""
-    } = req.body;
-
-    if (!gameId || !playerId) {
-      console.log("❌ Missing required fields: gameId or playerId");
-      return res.status(400).json({ error: 14, description: "Required field missing: gameId or playerId" });
-    }
-
-    // 1️⃣ Generate one-time token
-    const token = generateToken();
-    console.log("🆔 Generated token:", token);
-
-    // 2️⃣ Prepare params
-    const requestParams = {
-      secureLogin: SECURE_LOGIN,
-      symbol: gameId,
-      language,
-      token,
-      externalPlayerId: playerId,
-      currency,
-      platform,
-      technology: "H5",
-      stylename: SECURE_LOGIN,
-      cashierUrl,
-      lobbyUrl,
-      country,
-      promo,
-      playMode
-    };
-
-    console.log("📦 Request params (before hash):", requestParams);
-
-    // 3️⃣ Generate hash
-    const hash = generatePPHash(requestParams);
-    console.log("🔐 Generated hash:", hash);
-
-    // 4️⃣ Prepare POST body
-    const bodyParams = new URLSearchParams({ ...requestParams, hash }).toString();
-    console.log("🧾 POST Body (URL encoded):", bodyParams);
-
-    // 5️⃣ Call PP GameURL API
-    console.log("🌍 Sending request to Pragmatic Play:", API_URL2);
-    const response = await axios.post(API_URL2, bodyParams, {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      timeout: 15000
-    });
-
-    console.log("📨 Received response:", response.data);
-    const data = response.data;
-
-    // 6️⃣ Handle PP response errors
-    if (data.error && data.error !== "0") {
-      console.log("⚠️ PP responded with an error:", data);
-      return res.status(400).json({ error: data.error, description: data.description });
-    }
-
-    // 7️⃣ Return success
-    console.log("✅ Game URL generated successfully:", data.gameURL);
-
-    return res.json({
-      error: 0,
-      description: data.description || "OK",
-      gameURL: data.gameURL,
-      token
-    });
-
-  } catch (err) {
-    console.error("💥 GameURL API request failed:", err.message);
-    if (err.response) {
-      console.error("📜 Response status:", err.response.status);
-      console.error("📜 Response data:", err.response.data);
-    } else {
-      console.error("⚠️ No response received:", err);
-    }
-    return res.status(500).json({
-      error: 1,
-      description: "Internal server error: failed to generate game URL",
-      details: err.message
-    });
-  }
-});
-
-
-
-
+// =====================
+// Player Database (in-memory for mock)
+// =====================
 const playersDB = {
   "player123": {
     userId: "421",
@@ -230,207 +101,169 @@ const playersDB = {
     promoEligible: true,
     aamsTicket: "aams123",
     aamsSessionId: "sess456",
-    token: generateToken(),
+    token: null,
     ipAddress: "192.168.1.10"
   }
 };
 
-// Helper function to calculate MD5 hash
+// =====================
+// /getGameUrl
+// =====================
+router.post("/getGameUrl", async (req, res) => {
+  try {
+    console.log("===== /getGameUrl CALLED =====");
+    console.log("📩 Request body:", req.body);
 
+    const {
+      gameId,
+      playerId,
+      currency = "USD",
+      platform = "WEB",
+      language = "en",
+      playMode = "REAL",
+      country = "US"
+    } = req.body;
 
-// POST /authenticate.html
+    if (!gameId || !playerId) return res.status(400).json({ error: 14, description: "Missing required field" });
+
+    const player = playersDB[playerId];
+    if (!player) return res.status(404).json({ error: 1, description: "Player not found" });
+
+    // Generate one-time token and store in DB
+    const token = generateToken();
+    player.token = token;
+
+    const requestParams = {
+      secureLogin: SECURE_LOGIN,
+      symbol: gameId,
+      language,
+      token,
+      externalPlayerId: playerId,
+      currency,
+      platform,
+      technology: "H5",
+      stylename: SECURE_LOGIN,
+      cashierUrl: "",
+      lobbyUrl: "",
+      country,
+      promo: "n",
+      playMode
+    };
+
+    const hash = calculateHash(requestParams, SECRET_KEY);
+    console.log("🔐 Generated hash:", hash);
+
+    const bodyParams = new URLSearchParams({ ...requestParams, hash }).toString();
+    console.log("🧾 POST Body (URL encoded):", bodyParams);
+
+    const response = await axios.post(API_URL2, bodyParams, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      timeout: 15000
+    });
+
+    console.log("📨 Received response:", response.data);
+
+    if (response.data.error && response.data.error !== "0") {
+      return res.status(400).json(response.data);
+    }
+
+    res.json({
+      error: 0,
+      description: response.data.description || "OK",
+      gameURL: response.data.gameURL,
+      token
+    });
+
+  } catch (err) {
+    console.error("💥 /getGameUrl failed:", err.message);
+    res.status(500).json({ error: 1, description: "Failed to generate game URL", details: err.message });
+  }
+});
+
+// =====================
+// /authenticate
+// =====================
 router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) => {
   console.log("===== /authenticate CALLED =====");
   console.log("📩 Request body:", req.body);
 
-  const {
-    token,
-    providerId,
-    gameId,
-    hash,
-    ipAddress,
-    chosenBalance,
-    launchingType,
-    previousToken
-  } = req.body;
+  const { token, providerId, hash, ...optional } = req.body;
 
-  // Log extracted values
-  console.log("🔹 Extracted values:");
-  console.log({ token, providerId, gameId, hash, ipAddress, chosenBalance, launchingType, previousToken });
-
-  // Validate required fields
   if (!token || !providerId || !hash) {
-    console.log("❌ Missing required parameter(s)");
-    return res.json({
-      error: 7,
-      description: "Missing required parameter(s)"
-    });
+    return res.json({ error: 7, description: "Missing required parameter(s)" });
   }
 
-  // Validate hash (include optional fields if present)
-  const calculatedHash = generatePPHash(
-    { token, providerId, gameId, ipAddress, chosenBalance, launchingType, previousToken },
-    SECRET_KEY
-  );
+  const calculatedHash = calculateHash({ token, providerId, ...optional }, SECRET_KEY);
   console.log("🔐 Calculated hash:", calculatedHash);
 
-  if (calculatedHash !== hash) {
-    console.log("❌ Invalid hash or credentials");
-    return res.json({
-      error: 2,
-      description: "Invalid hash or credentials"
-    });
-  }
+  if (calculatedHash !== hash) return res.json({ error: 2, description: "Invalid hash or credentials" });
 
-  // Lookup player by token
-  console.log("🔍 Looking up player in DB by token:", token);
-  const player = playersDB[token];
-  if (!player) {
-    console.log("❌ Player not found or token invalid");
-    return res.json({
-      error: 1,
-      description: "Player not found or token invalid"
-    });
-  }
+  const player = Object.values(playersDB).find(p => p.token === token);
+  if (!player) return res.json({ error: 1, description: "Player not found or token invalid" });
 
-  console.log("✅ Player found:", player);
-
-  // Build response with all optional fields
-  const response = {
+  res.json({
     userId: player.userId,
     currency: player.currency,
     cash: player.cash,
     bonus: player.bonus,
-    token: player.token, // optional session token
+    token: player.token,
     country: player.country,
     jurisdiction: player.jurisdiction,
-    betLimits: {
-      defaultBet: 0.1,
-      defaultTotalBet: 1.0,
-      minBet: 0.02,
-      maxBet: 10.0,
-      minTotalBet: 0.5,
-      maxTotalBet: 250.0,
-      extMinTotalBet: 0.5,
-      extMaxTotalBet: 250.0
-    },
-    extraInfo: {
-      promoAvailable: player.promoEligible ? "Y" : "N",
-      jurisdictionMaxBet: 5.0,
-      aamsTicket: player.aamsTicket,
-      aamsSessionId: player.aamsSessionId
-    },
-    error: 0,
-    description: "Success"
-  };
-
-  console.log("📦 Response being sent:", response);
-
-  return res.json(response);
-});
-
-
-
-
-
-// POST /balance.html
-router.post("/balance", express.urlencoded({ extended: true }), (req, res) => {
-  const { hash, providerId, userId, token } = req.body;
-
-  if (!hash || !providerId || !userId) {
-    return res.json({ error: 7, description: "Missing required parameter(s)" });
-  }
-
-  // Validate hash (optional token included if provided)
-  const calculatedHash = calculateHash({ providerId, userId, token }, SECRET_KEY);
-  if (calculatedHash !== hash) {
-    return res.json({ error: 2, description: "Invalid hash" });
-  }
-
-  const player = Object.values(playersDB).find(p => p.userId === userId);
-  if (!player) {
-    return res.json({ error: 1, description: "Player not found" });
-  }
-
-  res.json({
-    currency: player.currency,
-    cash: player.cash,
-    bonus: player.bonus,
-    totalBalance: player.cash + player.bonus, // optional field for Italian market
+    betLimits: { defaultBet: 0.1, defaultTotalBet: 1, minBet: 0.02, maxBet: 10 },
+    extraInfo: { promoAvailable: player.promoEligible ? "Y" : "N" },
     error: 0,
     description: "Success"
   });
 });
 
+// =====================
+// /balance
+// =====================
+router.post("/balance", express.urlencoded({ extended: true }), (req, res) => {
+  const { hash, providerId, userId, token } = req.body;
 
+  if (!hash || !providerId || !userId) return res.json({ error: 7, description: "Missing required parameter(s)" });
 
+  const calculatedHash = calculateHash({ providerId, userId, token }, SECRET_KEY);
+  if (calculatedHash !== hash) return res.json({ error: 2, description: "Invalid hash" });
 
-// POST /bet.html
+  const player = Object.values(playersDB).find(p => p.userId === userId);
+  if (!player) return res.json({ error: 1, description: "Player not found" });
+
+  res.json({
+    currency: player.currency,
+    cash: player.cash,
+    bonus: player.bonus,
+    totalBalance: player.cash + player.bonus,
+    error: 0,
+    description: "Success"
+  });
+});
+
+// =====================
+// /bet
+// =====================
 router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
   const {
-    hash,
-    providerId,
-    userId,
-    token,
-    gameId,
-    roundId,
-    amount,
-    reference,
-    timestamp,
-    roundDetails,
-    bonusCode,
-    platform,
-    language,
-    jackpotContribution,
-    jackpotDetails,
-    jackpotId,
-    ipAddress
+    hash, providerId, userId, token, gameId, roundId, amount, reference, timestamp
   } = req.body;
 
-
-
-  // Required fields validation
   if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp) {
     return res.json({ error: 7, description: "Missing required parameter(s)" });
   }
 
-  // Validate hash
-  const calculatedHash = calculateHash({
-    providerId,
-    userId,
-    token,
-    gameId,
-    roundId,
-    amount,
-    reference,
-    timestamp,
-    roundDetails,
-    bonusCode,
-    platform,
-    language,
-    jackpotContribution,
-    jackpotDetails,
-    jackpotId,
-    ipAddress
-  }, SECRET_KEY);
+  const calculatedHash = calculateHash({ providerId, userId, token, gameId, roundId, amount, reference, timestamp }, SECRET_KEY);
+  if (calculatedHash !== hash) return res.json({ error: 2, description: "Invalid hash" });
 
-  if (calculatedHash !== hash) {
-    return res.json({ error: 2, description: "Invalid hash" });
-  }
-
-  // Lookup player
   const player = Object.values(playersDB).find(p => p.userId === userId);
   if (!player) return res.json({ error: 1, description: "Player not found" });
 
-  // Ensure idempotency using reference (for demo, simple in-memory tracking)
   if (!global.betHistory) global.betHistory = {};
-  if (global.betHistory[reference]) {
-    return res.json(global.betHistory[reference]);
-  }
+  if (global.betHistory[reference]) return res.json(global.betHistory[reference]);
 
-  // Deduct bet from cash (first from cash, then bonus if configured)
-  let usedPromo = 0;
   let remainingAmount = parseFloat(amount);
+  let usedPromo = 0;
+
   if (player.cash >= remainingAmount) {
     player.cash -= remainingAmount;
   } else {
@@ -440,124 +273,524 @@ router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
     player.bonus -= usedPromo;
   }
 
-  const response = {
-    transactionId: Date.now(),
-    currency: player.currency,
-    cash: player.cash,
-    bonus: player.bonus,
-    usedPromo,
-    error: 0,
-    description: "Success"
-  };
-
-  // Store transaction to ensure idempotency
+  const response = { transactionId: Date.now(), currency: player.currency, cash: player.cash, bonus: player.bonus, usedPromo, error: 0, description: "Success" };
   global.betHistory[reference] = response;
 
   res.json(response);
 });
 
-
-// POST /result.html
+// =====================
+// /result
+// =====================
 router.post("/result", express.urlencoded({ extended: true }), (req, res) => {
-  const {
-    hash,
-    providerId,
-    userId,
-    token,
-    gameId,
-    roundId,
-    amount,
-    reference,
-    timestamp,
-    roundDetails,
-    bonusCode,
-    platform,
-    promoWinAmount,
-    promoWinReference,
-    promoCampaignID,
-    promoCampaignType,
-    specPrizes // can be an array of objects [{specPrizeAmount, specPrizeCode, specPrizeType}]
-  } = req.body;
+  const { hash, providerId, userId, token, gameId, roundId, amount, reference, timestamp } = req.body;
 
-
-
-  // Required fields validation
   if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp) {
     return res.json({ error: 7, description: "Missing required parameter(s)" });
   }
 
-  // Validate hash including optional fields if provided
-  const calculatedHash = calculateHash({
-    providerId,
-    userId,
-    token,
-    gameId,
-    roundId,
-    amount,
-    reference,
-    timestamp,
-    roundDetails,
-    bonusCode,
-    platform,
-    promoWinAmount,
-    promoWinReference,
-    promoCampaignID,
-    promoCampaignType,
-    specPrizes
-  }, SECRET_KEY);
+  const calculatedHash = calculateHash({ providerId, userId, token, gameId, roundId, amount, reference, timestamp }, SECRET_KEY);
+  if (calculatedHash !== hash) return res.json({ error: 2, description: "Invalid hash" });
 
-  if (calculatedHash !== hash) {
-    return res.json({ error: 2, description: "Invalid hash" });
-  }
-
-  // Lookup player
   const player = Object.values(playersDB).find(p => p.userId === userId);
   if (!player) return res.json({ error: 1, description: "Player not found" });
 
-  // Ensure idempotency using reference
   if (!global.resultHistory) global.resultHistory = {};
-  if (global.resultHistory[reference]) {
-    return res.json(global.resultHistory[reference]);
-  }
+  if (global.resultHistory[reference]) return res.json(global.resultHistory[reference]);
 
-  // Add win amount to player's cash
   player.cash += parseFloat(amount);
 
-  // Handle promo wins if provided
-  if (promoWinAmount && promoWinReference && promoCampaignID && promoCampaignType) {
-    player.cash += parseFloat(promoWinAmount);
-    // Optional: store promo win for history
-    if (!player.promoHistory) player.promoHistory = [];
-    player.promoHistory.push({
-      promoWinAmount,
-      promoWinReference,
-      promoCampaignID,
-      promoCampaignType
-    });
-  }
-
-  // Optional: handle bingo-specific special prizes
-  if (Array.isArray(specPrizes)) {
-    if (!player.specPrizes) player.specPrizes = [];
-    specPrizes.forEach(prize => {
-      player.specPrizes.push(prize);
-    });
-  }
-
-  const response = {
-    transactionId: Date.now(),
-    currency: player.currency,
-    cash: player.cash,
-    bonus: player.bonus,
-    error: 0,
-    description: "Success"
-  };
-
-  // Store transaction to ensure idempotency
+  const response = { transactionId: Date.now(), currency: player.currency, cash: player.cash, bonus: player.bonus, error: 0, description: "Success" };
   global.resultHistory[reference] = response;
 
   res.json(response);
 });
+
+
+
+
+
+
+
+
+
+
+
+// // Utility: generate MD5 hash according to PP doc
+// function generateHash(params) {
+//   // 1. Sort all keys alphabetically
+//   const sortedKeys = Object.keys(params).sort();
+
+//   // 2. Concatenate key=value with &
+//   const paramString = sortedKeys
+//     .map(key => `${key}=${params[key]}`)
+//     .join("&");
+
+//   // 3. Append secret key
+//   const stringToHash = paramString + OPERATOR_SECRET;
+
+//   // 4. Generate MD5 hash
+//   return crypto.createHash("md5").update(stringToHash).digest("hex");
+// }
+
+// // Generate one-time token for player (simple example, you can store in DB for validation)
+// function generateToken() {
+//   return crypto.randomBytes(16).toString("hex");
+// }
+
+// /**
+//  * POST /pp/getGameUrl
+//  * Body parameters:
+//  *  - gameId (symbol)
+//  *  - playerId (externalPlayerId)
+//  *  - currency (optional)
+//  *  - platform (optional)
+//  *  - language (optional, default 'en')
+//  *  - playMode (optional, 'REAL' or 'DEMO')
+//  */
+// router.post("/getGameUrl", async (req, res) => {
+//   try {
+//     console.log("\n===== /getGameUrl CALLED =====");
+//     console.log("📩 Request body:", req.body);
+
+//     const {
+//       gameId,
+//       playerId,
+//       currency = "USD",
+//       platform = "WEB",
+//       language = "en",
+//       playMode = "REAL",
+//       country = "US",   // required
+//       promo = "n",
+//       cashierUrl = "",
+//       lobbyUrl = ""
+//     } = req.body;
+
+//     if (!gameId || !playerId) {
+//       console.log("❌ Missing required fields: gameId or playerId");
+//       return res.status(400).json({ error: 14, description: "Required field missing: gameId or playerId" });
+//     }
+
+//     // 1️⃣ Generate one-time token
+//     const token = generateToken();
+//     console.log("🆔 Generated token:", token);
+
+//     // 2️⃣ Prepare params
+//     const requestParams = {
+//       secureLogin: SECURE_LOGIN,
+//       symbol: gameId,
+//       language,
+//       token,
+//       externalPlayerId: playerId,
+//       currency,
+//       platform,
+//       technology: "H5",
+//       stylename: SECURE_LOGIN,
+//       cashierUrl,
+//       lobbyUrl,
+//       country,
+//       promo,
+//       playMode
+//     };
+
+//     console.log("📦 Request params (before hash):", requestParams);
+
+//     // 3️⃣ Generate hash
+//     const hash = generateHash(requestParams);
+//     console.log("🔐 Generated hash:", hash);
+
+//     // 4️⃣ Prepare POST body
+//     const bodyParams = new URLSearchParams({ ...requestParams, hash }).toString();
+//     console.log("🧾 POST Body (URL encoded):", bodyParams);
+
+//     // 5️⃣ Call PP GameURL API
+//     console.log("🌍 Sending request to Pragmatic Play:", API_URL2);
+//     const response = await axios.post(API_URL2, bodyParams, {
+//       headers: { "Content-Type": "application/x-www-form-urlencoded" },
+//       timeout: 15000
+//     });
+
+//     console.log("📨 Received response:", response.data);
+//     const data = response.data;
+
+//     // 6️⃣ Handle PP response errors
+//     if (data.error && data.error !== "0") {
+//       console.log("⚠️ PP responded with an error:", data);
+//       return res.status(400).json({ error: data.error, description: data.description });
+//     }
+
+//     // 7️⃣ Return success
+//     console.log("✅ Game URL generated successfully:", data.gameURL);
+
+//     return res.json({
+//       error: 0,
+//       description: data.description || "OK",
+//       gameURL: data.gameURL,
+//       token
+//     });
+
+//   } catch (err) {
+//     console.error("💥 GameURL API request failed:", err.message);
+//     if (err.response) {
+//       console.error("📜 Response status:", err.response.status);
+//       console.error("📜 Response data:", err.response.data);
+//     } else {
+//       console.error("⚠️ No response received:", err);
+//     }
+//     return res.status(500).json({
+//       error: 1,
+//       description: "Internal server error: failed to generate game URL",
+//       details: err.message
+//     });
+//   }
+// });
+
+
+
+
+// const playersDB = {
+//   "player123": {
+//     userId: "421",
+//     currency: "BDT",
+//     cash: 99999.99,
+//     bonus: 99.99,
+//     country: "BD",
+//     jurisdiction: "UK",
+//     promoEligible: true,
+//     aamsTicket: "aams123",
+//     aamsSessionId: "sess456",
+//     token: generateToken(),
+//     ipAddress: "192.168.1.10"
+//   }
+// };
+
+// // Helper function to calculate MD5 hash
+// function calculateHash(params, secret) {
+//   const keys = Object.keys(params).sort();
+//   const stringToHash = keys.map(k => `${k}=${params[k] || ""}`).join("&") + secret;
+//   return crypto.createHash("md5").update(stringToHash).digest("hex");
+// }
+
+// // POST /authenticate.html
+// router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) => {
+//   console.log("===== /authenticate CALLED =====");
+//   console.log("📩 Request body:", req.body);
+
+//   const {
+//     token,
+//     providerId,
+//     gameId,
+//     hash,
+//     ipAddress,
+//     chosenBalance,
+//     launchingType,
+//     previousToken
+//   } = req.body;
+
+//   // Log extracted values
+//   console.log("🔹 Extracted values:");
+//   console.log({ token, providerId, gameId, hash, ipAddress, chosenBalance, launchingType, previousToken });
+
+//   // Validate required fields
+//   if (!token || !providerId || !hash) {
+//     console.log("❌ Missing required parameter(s)");
+//     return res.json({
+//       error: 7,
+//       description: "Missing required parameter(s)"
+//     });
+//   }
+
+//   // Validate hash (include optional fields if present)
+//   const calculatedHash = calculateHash(
+//     { token, providerId, gameId, ipAddress, chosenBalance, launchingType, previousToken },
+//     SECRET_KEY
+//   );
+//   console.log("🔐 Calculated hash:", calculatedHash);
+
+//   if (calculatedHash !== hash) {
+//     console.log("❌ Invalid hash or credentials");
+//     return res.json({
+//       error: 2,
+//       description: "Invalid hash or credentials"
+//     });
+//   }
+
+//   // Lookup player by token
+//   console.log("🔍 Looking up player in DB by token:", token);
+//   const player = playersDB[token];
+//   if (!player) {
+//     console.log("❌ Player not found or token invalid");
+//     return res.json({
+//       error: 1,
+//       description: "Player not found or token invalid"
+//     });
+//   }
+
+//   console.log("✅ Player found:", player);
+
+//   // Build response with all optional fields
+//   const response = {
+//     userId: player.userId,
+//     currency: player.currency,
+//     cash: player.cash,
+//     bonus: player.bonus,
+//     token: player.token, // optional session token
+//     country: player.country,
+//     jurisdiction: player.jurisdiction,
+//     betLimits: {
+//       defaultBet: 0.1,
+//       defaultTotalBet: 1.0,
+//       minBet: 0.02,
+//       maxBet: 10.0,
+//       minTotalBet: 0.5,
+//       maxTotalBet: 250.0,
+//       extMinTotalBet: 0.5,
+//       extMaxTotalBet: 250.0
+//     },
+//     extraInfo: {
+//       promoAvailable: player.promoEligible ? "Y" : "N",
+//       jurisdictionMaxBet: 5.0,
+//       aamsTicket: player.aamsTicket,
+//       aamsSessionId: player.aamsSessionId
+//     },
+//     error: 0,
+//     description: "Success"
+//   };
+
+//   console.log("📦 Response being sent:", response);
+
+//   return res.json(response);
+// });
+
+
+
+
+
+// // POST /balance.html
+// router.post("/balance", express.urlencoded({ extended: true }), (req, res) => {
+//   const { hash, providerId, userId, token } = req.body;
+
+//   if (!hash || !providerId || !userId) {
+//     return res.json({ error: 7, description: "Missing required parameter(s)" });
+//   }
+
+//   // Validate hash (optional token included if provided)
+//   const calculatedHash = calculateHash({ providerId, userId, token }, SECRET_KEY);
+//   if (calculatedHash !== hash) {
+//     return res.json({ error: 2, description: "Invalid hash" });
+//   }
+
+//   const player = Object.values(playersDB).find(p => p.userId === userId);
+//   if (!player) {
+//     return res.json({ error: 1, description: "Player not found" });
+//   }
+
+//   res.json({
+//     currency: player.currency,
+//     cash: player.cash,
+//     bonus: player.bonus,
+//     totalBalance: player.cash + player.bonus, // optional field for Italian market
+//     error: 0,
+//     description: "Success"
+//   });
+// });
+
+
+
+
+// // POST /bet.html
+// router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
+//   const {
+//     hash,
+//     providerId,
+//     userId,
+//     token,
+//     gameId,
+//     roundId,
+//     amount,
+//     reference,
+//     timestamp,
+//     roundDetails,
+//     bonusCode,
+//     platform,
+//     language,
+//     jackpotContribution,
+//     jackpotDetails,
+//     jackpotId,
+//     ipAddress
+//   } = req.body;
+
+
+
+//   // Required fields validation
+//   if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp) {
+//     return res.json({ error: 7, description: "Missing required parameter(s)" });
+//   }
+
+//   // Validate hash
+//   const calculatedHash = calculateHash({
+//     providerId,
+//     userId,
+//     token,
+//     gameId,
+//     roundId,
+//     amount,
+//     reference,
+//     timestamp,
+//     roundDetails,
+//     bonusCode,
+//     platform,
+//     language,
+//     jackpotContribution,
+//     jackpotDetails,
+//     jackpotId,
+//     ipAddress
+//   }, SECRET_KEY);
+
+//   if (calculatedHash !== hash) {
+//     return res.json({ error: 2, description: "Invalid hash" });
+//   }
+
+//   // Lookup player
+//   const player = Object.values(playersDB).find(p => p.userId === userId);
+//   if (!player) return res.json({ error: 1, description: "Player not found" });
+
+//   // Ensure idempotency using reference (for demo, simple in-memory tracking)
+//   if (!global.betHistory) global.betHistory = {};
+//   if (global.betHistory[reference]) {
+//     return res.json(global.betHistory[reference]);
+//   }
+
+//   // Deduct bet from cash (first from cash, then bonus if configured)
+//   let usedPromo = 0;
+//   let remainingAmount = parseFloat(amount);
+//   if (player.cash >= remainingAmount) {
+//     player.cash -= remainingAmount;
+//   } else {
+//     remainingAmount -= player.cash;
+//     player.cash = 0;
+//     usedPromo = Math.min(remainingAmount, player.bonus);
+//     player.bonus -= usedPromo;
+//   }
+
+//   const response = {
+//     transactionId: Date.now(),
+//     currency: player.currency,
+//     cash: player.cash,
+//     bonus: player.bonus,
+//     usedPromo,
+//     error: 0,
+//     description: "Success"
+//   };
+
+//   // Store transaction to ensure idempotency
+//   global.betHistory[reference] = response;
+
+//   res.json(response);
+// });
+
+
+// // POST /result.html
+// router.post("/result", express.urlencoded({ extended: true }), (req, res) => {
+//   const {
+//     hash,
+//     providerId,
+//     userId,
+//     token,
+//     gameId,
+//     roundId,
+//     amount,
+//     reference,
+//     timestamp,
+//     roundDetails,
+//     bonusCode,
+//     platform,
+//     promoWinAmount,
+//     promoWinReference,
+//     promoCampaignID,
+//     promoCampaignType,
+//     specPrizes // can be an array of objects [{specPrizeAmount, specPrizeCode, specPrizeType}]
+//   } = req.body;
+
+
+
+//   // Required fields validation
+//   if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp) {
+//     return res.json({ error: 7, description: "Missing required parameter(s)" });
+//   }
+
+//   // Validate hash including optional fields if provided
+//   const calculatedHash = calculateHash({
+//     providerId,
+//     userId,
+//     token,
+//     gameId,
+//     roundId,
+//     amount,
+//     reference,
+//     timestamp,
+//     roundDetails,
+//     bonusCode,
+//     platform,
+//     promoWinAmount,
+//     promoWinReference,
+//     promoCampaignID,
+//     promoCampaignType,
+//     specPrizes
+//   }, SECRET_KEY);
+
+//   if (calculatedHash !== hash) {
+//     return res.json({ error: 2, description: "Invalid hash" });
+//   }
+
+//   // Lookup player
+//   const player = Object.values(playersDB).find(p => p.userId === userId);
+//   if (!player) return res.json({ error: 1, description: "Player not found" });
+
+//   // Ensure idempotency using reference
+//   if (!global.resultHistory) global.resultHistory = {};
+//   if (global.resultHistory[reference]) {
+//     return res.json(global.resultHistory[reference]);
+//   }
+
+//   // Add win amount to player's cash
+//   player.cash += parseFloat(amount);
+
+//   // Handle promo wins if provided
+//   if (promoWinAmount && promoWinReference && promoCampaignID && promoCampaignType) {
+//     player.cash += parseFloat(promoWinAmount);
+//     // Optional: store promo win for history
+//     if (!player.promoHistory) player.promoHistory = [];
+//     player.promoHistory.push({
+//       promoWinAmount,
+//       promoWinReference,
+//       promoCampaignID,
+//       promoCampaignType
+//     });
+//   }
+
+//   // Optional: handle bingo-specific special prizes
+//   if (Array.isArray(specPrizes)) {
+//     if (!player.specPrizes) player.specPrizes = [];
+//     specPrizes.forEach(prize => {
+//       player.specPrizes.push(prize);
+//     });
+//   }
+
+//   const response = {
+//     transactionId: Date.now(),
+//     currency: player.currency,
+//     cash: player.cash,
+//     bonus: player.bonus,
+//     error: 0,
+//     description: "Success"
+//   };
+
+//   // Store transaction to ensure idempotency
+//   global.resultHistory[reference] = response;
+
+//   res.json(response);
+// });
 
 
 // POST /refund.html
