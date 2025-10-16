@@ -244,6 +244,9 @@ function calculateHash(params, secret) {
 
 // POST /authenticate.html
 router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) => {
+  console.log("===== /authenticate CALLED =====");
+  console.log("📩 Request body:", req.body);
+
   const {
     token,
     providerId,
@@ -255,10 +258,13 @@ router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) 
     previousToken
   } = req.body;
 
- 
+  // Log extracted values
+  console.log("🔹 Extracted values:");
+  console.log({ token, providerId, gameId, hash, ipAddress, chosenBalance, launchingType, previousToken });
 
   // Validate required fields
   if (!token || !providerId || !hash) {
+    console.log("❌ Missing required parameter(s)");
     return res.json({
       error: 7,
       description: "Missing required parameter(s)"
@@ -270,8 +276,10 @@ router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) 
     { token, providerId, gameId, ipAddress, chosenBalance, launchingType, previousToken },
     SECRET_KEY
   );
+  console.log("🔐 Calculated hash:", calculatedHash);
 
   if (calculatedHash !== hash) {
+    console.log("❌ Invalid hash or credentials");
     return res.json({
       error: 2,
       description: "Invalid hash or credentials"
@@ -279,13 +287,17 @@ router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) 
   }
 
   // Lookup player by token
+  console.log("🔍 Looking up player in DB by token:", token);
   const player = playersDB[token];
   if (!player) {
+    console.log("❌ Player not found or token invalid");
     return res.json({
       error: 1,
       description: "Player not found or token invalid"
     });
   }
+
+  console.log("✅ Player found:", player);
 
   // Build response with all optional fields
   const response = {
@@ -316,8 +328,11 @@ router.post("/authenticate", express.urlencoded({ extended: true }), (req, res) 
     description: "Success"
   };
 
+  console.log("📦 Response being sent:", response);
+
   return res.json(response);
 });
+
 
 
 
