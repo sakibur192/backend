@@ -222,10 +222,10 @@ router.post("/getGameUrl", async (req, res) => {
 const playersDB = {
   "player123": {
     userId: "421",
-    currency: "USD",
+    currency: "BDT",
     cash: 99999.99,
     bonus: 99.99,
-    country: "GB",
+    country: "BD",
     jurisdiction: "UK",
     promoEligible: true,
     aamsTicket: "aams123",
