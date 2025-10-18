@@ -192,6 +192,171 @@ router.post("/getGameUrl", async (req, res) => {
   }
 });
 
+//bet
+
+
+router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
+  console.log("\n\n==============================");
+  console.log("🎯 [START] /bet CALLED");
+  console.log("==============================");
+  console.log("📩 Raw Request Body:", JSON.stringify(req.body, null, 2));
+
+  const {
+    hash,
+    providerId,
+    userId,
+    gameId,
+    roundId,
+    amount,
+    reference,
+    timestamp,
+    token,
+    roundDetails,
+    bonusCode,
+    platform,
+    language,
+    jackpotContribution,
+    jackpotDetails,
+    jackpotId,
+    ipAddress
+  } = req.body;
+
+  console.log("\n🧩 Extracted Fields:");
+  console.table({
+    hash,
+    providerId,
+    userId,
+    gameId,
+    roundId,
+    amount,
+    reference,
+    timestamp,
+    token,
+    roundDetails,
+    bonusCode,
+    platform,
+    language,
+    jackpotContribution,
+    jackpotDetails,
+    jackpotId,
+    ipAddress
+  });
+
+  // 1️⃣ Validate required parameters
+  console.log("\n✅ Step 1: Validating required parameters...");
+  if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp) {
+    console.error("❌ Missing required parameter(s)");
+    return res.json({ error: 7, description: "Missing required parameter(s)" });
+  }
+
+  // 2️⃣ Calculate hash for debug (for inspection only)
+  console.log("\n🔐 Step 2: Calculating hash for comparison...");
+  const hashParams = {
+    providerId,
+    userId,
+    token,
+    gameId,
+    roundId,
+    amount,
+    reference,
+    timestamp
+  };
+
+  console.log("📦 Hash parameters (unsorted):", hashParams);
+
+  const calculatedHash = calculateHash(hashParams, SECRET_KEY);
+  console.log("🔑 Hash params (alphabetically sorted):", Object.keys(hashParams).sort());
+  console.log("🔐 Calculated Hash:", calculatedHash);
+  console.log("🔍 Provided Hash :", hash);
+
+  if (calculatedHash !== hash) {
+    console.error("❌ Hash mismatch detected!");
+    console.log("👉 Please compare the string used in MD5 for debugging:");
+    const sortedKeys = Object.keys(hashParams).sort();
+    const debugString =
+      sortedKeys.map(k => `${k}=${hashParams[k]}`).join("&") + SECRET_KEY;
+    console.log("🧮 MD5 Input String:", debugString);
+    console.log("🔁 MD5 Output:", calculatedHash);
+    console.log("🔚 Expected (From PragmaticPlay):", hash);
+    return res.json({ error: 2, description: "Invalid hash" });
+  }
+
+  // 3️⃣ Find player
+  console.log("\n👤 Step 3: Fetching player...");
+  const player = playersDB[userId];
+  if (!player) {
+    console.error(`❌ Player not found: userId=${userId}`);
+    return res.json({ error: 1, description: "Player not found" });
+  }
+
+  console.log("✅ Player found:", player);
+
+  // 4️⃣ Idempotency check
+  console.log("\n🔁 Step 4: Checking for duplicate bet reference...");
+  if (!global.betHistory) global.betHistory = {};
+  if (global.betHistory[reference]) {
+    console.warn(`⚠️ Duplicate bet detected: ${reference}`);
+    console.log("🔁 Returning previously saved transaction response.");
+    return res.json(global.betHistory[reference]);
+  }
+
+  // 5️⃣ Deduct player balance
+  console.log("\n💳 Step 5: Deducting bet amount...");
+  const betAmount = parseFloat(amount);
+  console.log(`➡️ Bet Amount: ${betAmount}`);
+
+  let usedBonus = 0;
+
+  if (player.cash >= betAmount) {
+    console.log(`🟢 Enough cash balance (${player.cash}). Deducting ${betAmount}.`);
+    player.cash -= betAmount;
+  } else {
+    console.log(`🔴 Insufficient cash. Using bonus balance.`);
+    const remaining = betAmount - player.cash;
+    console.log(`➡️ Remaining after cash: ${remaining}`);
+    player.cash = 0;
+    usedBonus = Math.min(remaining, player.bonus);
+    console.log(`💰 Using ${usedBonus} from bonus (${player.bonus} available).`);
+    player.bonus -= usedBonus;
+  }
+
+  console.log("💰 Updated Player Balances:");
+  console.table({
+    "Cash (After)": player.cash,
+    "Bonus (After)": player.bonus,
+    "Used Bonus": usedBonus
+  });
+
+  // 6️⃣ Build response
+  console.log("\n🧾 Step 6: Building response...");
+  const response = {
+    transactionId: Date.now(),
+    currency: player.currency,
+    cash: parseFloat(player.cash.toFixed(2)),
+    bonus: parseFloat(player.bonus.toFixed(2)),
+    usedPromo: parseFloat(usedBonus.toFixed(2)),
+    error: 0,
+    description: "Success"
+  };
+  console.log("✅ Response Object:", response);
+
+  // 7️⃣ Cache transaction
+  console.log("\n💾 Step 7: Saving transaction for idempotency...");
+  global.betHistory[reference] = response;
+  console.log(`🗂️ Saved under reference: ${reference}`);
+
+  // 8️⃣ Return final response
+  console.log("\n🚀 Step 8: Sending final JSON response...");
+  console.log("📤 Response Sent:", response);
+  console.log("==============================");
+  console.log("🎯 [END] /bet PROCESS COMPLETED");
+  console.log("==============================\n\n");
+
+  res.json(response);
+});
+
+
+
 // =====================
 // 🔹 /authenticate
 // =====================
@@ -266,82 +431,7 @@ router.post("/balance", express.urlencoded({ extended: true }), (req, res) => {
 // =====================
 // 🔹 /bet
 // =====================
-router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
-  console.log("\n===== 🎯 /bet CALLED =====");
-  console.log("📩 Raw Request Body:", req.body);
 
-  const {
-    hash,
-    providerId,
-    userId,
-    gameId,
-    roundId,
-    amount,
-    reference,
-    timestamp,
-    token,
-    roundDetails,
-    bonusCode,
-    platform,
-    language,
-    jackpotContribution,
-    jackpotDetails,
-    jackpotId,
-    ipAddress
-  } = req.body;
-
-  if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp) {
-    return res.json({ error: 7, description: "Missing required parameter(s)" });
-  }
-
-  const hashParams = {
-    providerId, userId, token, gameId, roundId,
-    amount, reference, timestamp
-  };
-
-  const calculatedHash = calculateHash(hashParams, SECRET_KEY);
-  console.log("🔐 Calculated Hash:", calculatedHash);
-  console.log("🔍 Provided Hash:", hash);
-
-  if (calculatedHash !== hash) {
-    return res.json({ error: 2, description: "Invalid hash" });
-  }
-
-  const player = playersDB[userId];
-  if (!player) return res.json({ error: 1, description: "Player not found" });
-
-  if (global.betHistory[reference]) {
-    console.log("⚠️ Duplicate bet reference detected. Returning cached response.");
-    return res.json(global.betHistory[reference]);
-  }
-
-  // Deduct balance
-  const betAmount = parseFloat(amount);
-  let usedBonus = 0;
-  if (player.cash >= betAmount) {
-    player.cash -= betAmount;
-  } else {
-    const remaining = betAmount - player.cash;
-    player.cash = 0;
-    usedBonus = Math.min(remaining, player.bonus);
-    player.bonus -= usedBonus;
-  }
-
-  const response = {
-    transactionId: Date.now(),
-    currency: player.currency,
-    cash: parseFloat(player.cash.toFixed(2)),
-    bonus: parseFloat(player.bonus.toFixed(2)),
-    usedPromo: parseFloat(usedBonus.toFixed(2)),
-    error: 0,
-    description: "Success"
-  };
-
-  global.betHistory[reference] = response;
-  console.log("✅ Bet processed:", response);
-
-  res.json(response);
-});
 
 // =====================
 // 🔹 /result
