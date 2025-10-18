@@ -338,6 +338,11 @@ router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
 });
 
 // Example: add test player
+playersDB["421"] = {
+  cash: 500.0,
+  bonus: 50.0,
+  currency: "USD"
+};
 
 // router.post("/bet", express.urlencoded({ extended: true }), async (req, res) => {
 //   console.log("\n==============================");
