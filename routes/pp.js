@@ -74,14 +74,14 @@ router.post("/getCasinoGames", async (req, res) => {
   }
 });
 
-
 function calculateHash(params, secret) {
-  const sortedKeys = Object.keys(params)
-    .filter(k => k !== "hash" && params[k] !== undefined && params[k] !== null)
+  const filtered = Object.keys(params)
+    .filter(k => params[k] !== undefined && params[k] !== null && params[k] !== "")
     .sort();
-  const paramString = sortedKeys.map(k => `${k}=${params[k]}`).join("&");
+  const paramString = filtered.map(k => `${k}=${params[k]}`).join("&");
   return crypto.createHash("md5").update(paramString + secret).digest("hex");
 }
+
 
 function generateToken() {
   return crypto.randomBytes(16).toString("hex");
