@@ -199,7 +199,7 @@ router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
   console.log("\n==============================");
   console.log("🎯 [START] /bet CALLED");
   console.log("==============================");
-  console.log("📩 Raw Request Body:", JSON.stringify(req.body, null, 2));
+  console.log("📩 Raw Request Body:", req.body);
 
   const {
     hash,
@@ -210,44 +210,14 @@ router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
     amount,
     reference,
     timestamp,
-    roundDetails,
-    bonusCode,
-    platform,
-    language,
-    jackpotContribution,
-    jackpotDetails,
-    jackpotId,
-    token,
-    ipAddress
+    roundDetails
   } = req.body;
 
-  // Log all parameters
-  console.table({
-    hash,
-    providerId,
-    userId,
-    gameId,
-    roundId,
-    amount,
-    reference,
-    timestamp,
-    roundDetails,
-    bonusCode,
-    platform,
-    language,
-    jackpotContribution,
-    jackpotDetails,
-    jackpotId,
-    token,
-    ipAddress
-  });
-
-  // ✅ Validate required fields
   if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp || !roundDetails) {
-    return res.json({ error: 7, description: "Missing required parameter(s)" });
+    return res.json({ errorCode: 7, description: "Missing required parameter(s)" });
   }
 
-  // ✅ Dynamically include only defined fields
+  // ✅ Build string for hash verification
   const hashParams = {
     amount,
     gameId,
@@ -257,77 +227,56 @@ router.post("/bet", express.urlencoded({ extended: true }), (req, res) => {
     roundId,
     timestamp,
     userId,
-    bonusCode,
-    platform,
-    language,
-    jackpotContribution,
-    jackpotDetails,
-    jackpotId,
-    token,
-    ipAddress
   };
 
-  const filteredParams = {};
-  for (const key in hashParams) {
-    if (hashParams[key] !== undefined && hashParams[key] !== null && hashParams[key] !== "") {
-      filteredParams[key] = hashParams[key];
-    }
-  }
-
-  // ✅ Sort and compute MD5
-  const sortedKeys = Object.keys(filteredParams).sort();
-  const paramString = sortedKeys.map(k => `${k}=${filteredParams[k]}`).join("&");
-  const inputString = paramString + SECRET_KEY;
-
-  console.log("🧮 MD5 Input String:", inputString);
-
-  const calculatedHash = crypto.createHash("md5").update(inputString).digest("hex");
+  const calculatedHash = calculateHash(hashParams, SECRET_KEY);
   console.log("🔐 Calculated Hash:", calculatedHash);
-  console.log("🔍 Provided Hash :", hash);
+  console.log("🔍 Provided Hash  :", hash);
 
   if (calculatedHash !== hash) {
-    return res.json({ error: 2, description: "Invalid hash" });
+    return res.json({ errorCode: 2, description: "Invalid hash" });
   }
 
-  // ✅ Player lookup
+  // ✅ Check if player exists
   const player = playersDB[userId];
   if (!player) {
-    return res.json({ error: 1, description: "Player not found" });
+    return res.json({ errorCode: 1, description: "Player not found" });
   }
 
-  // ✅ Idempotency
-  if (!global.betHistory) global.betHistory = {};
-  if (global.betHistory[reference]) {
-    return res.json(global.betHistory[reference]);
-  }
-
-  // ✅ Deduct balance
   const betAmount = parseFloat(amount);
-  let usedBonus = 0;
 
-  if (player.cash >= betAmount) {
-    player.cash -= betAmount;
-  } else {
-    const remaining = betAmount - player.cash;
-    player.cash = 0;
-    usedBonus = Math.min(remaining, player.bonus);
-    player.bonus -= usedBonus;
+  if (player.cash < betAmount) {
+    console.log("❌ Insufficient funds");
+    return res.json({
+      errorCode: 1,
+      description: "Insufficient funds",
+      cash: player.cash,
+      bonus: player.bonus,
+      balance: player.cash + player.bonus,
+      currency: player.currency,
+      hash: calculateHash({ balance: player.cash + player.bonus }, SECRET_KEY)
+    });
   }
 
+  // ✅ Deduct bet
+  player.cash -= betAmount;
+
+  // ✅ Build response
   const response = {
+    errorCode: 0,
     transactionId: Date.now(),
-    currency: player.currency,
     cash: parseFloat(player.cash.toFixed(2)),
     bonus: parseFloat(player.bonus.toFixed(2)),
-    usedPromo: parseFloat(usedBonus.toFixed(2)),
-    error: 0,
-    description: "Success"
+    balance: parseFloat((player.cash + player.bonus).toFixed(2)),
+    currency: player.currency,
   };
 
-  global.betHistory[reference] = response;
+  // ✅ Add hash to response
+  response.hash = calculateHash({ balance: response.balance }, SECRET_KEY);
 
   console.log("✅ Final Response:", response);
   console.log("==============================\n");
+
   res.json(response);
 });
 
