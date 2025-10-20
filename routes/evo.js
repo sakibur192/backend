@@ -3,7 +3,7 @@ const axios = require("axios");
 const router = express.Router();
 
 // === EVO Config ===
-const EVO_HOST = "https://stgapi.evoapi.com"; // Replace with your Game List API Hostname
+const EVO_HOST = "https://site-stag-api.nimstad99.com"; // Replace with your Game List API Hostname
 const CASINO_KEY = "k3ztnqu12vbxosxm";              // Replace with your casino key
 const API_TOKEN = "d09ccec81641149074f92108b7e90078";           // Replace with your token
 
