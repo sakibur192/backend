@@ -21,6 +21,7 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
 const gameRoutes = require('./routes/games');
 const ppRoutes = require('./routes/pp');
+const evoRoutes = require('./routes/evo')
 
 
 
@@ -28,6 +29,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/fastspin', gameRoutes);
 app.use('/api/pp', ppRoutes);
+app.use('/api/evo', evoRoutes);
 
 
 
