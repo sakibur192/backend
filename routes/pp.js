@@ -559,46 +559,241 @@ router.post("/balance", express.urlencoded({ extended: true }), (req, res) => {
 // =====================
 // 🔹 /result
 // =====================
+// POST /result
 router.post("/result", express.urlencoded({ extended: true }), (req, res) => {
-  console.log("===== /result CALLED =====");
-  const {
-    hash, providerId, userId, token, gameId, roundId,
-    amount, reference, timestamp
-  } = req.body;
+  console.log("\n==============================");
+  console.log("🎯 [START] /result CALLED");
+  console.log("==============================");
 
-  if (!hash || !providerId || !userId || !gameId || !roundId || !amount || !reference || !timestamp) {
-    return res.json({ error: 7, description: "Missing required parameter(s)" });
+  try {
+    // raw
+    console.log("📥 Raw request headers:", req.headers);
+    console.log("📩 Raw request body:", JSON.stringify(req.body, null, 2));
+
+    // extract all params (including optional ones from doc)
+    const {
+      hash,
+      providerId,
+      userId,
+      token,
+      gameId,
+      roundId,
+      amount,
+      reference,
+      timestamp,
+      roundDetails,
+      bonusCode,
+      platform,
+      promoWinAmount,
+      promoWinReference,
+      promoCampaignID,
+      promoCampaignType,
+      specPrizes // may be an array or encoded string
+    } = req.body;
+
+    // show table
+    console.log("\n🔎 Extracted fields:");
+    console.table({
+      hash,
+      providerId,
+      userId,
+      token,
+      gameId,
+      roundId,
+      amount,
+      reference,
+      timestamp,
+      roundDetails,
+      bonusCode,
+      platform,
+      promoWinAmount,
+      promoWinReference,
+      promoCampaignID,
+      promoCampaignType,
+      specPrizes
+    });
+
+    // 1) Validate required fields
+    console.log("\n✅ Step 1: Validate required parameters");
+    const missing = [];
+    if (!hash) missing.push("hash");
+    if (!providerId) missing.push("providerId");
+    if (!userId) missing.push("userId");
+    if (!gameId) missing.push("gameId");
+    if (!roundId) missing.push("roundId");
+    if (amount === undefined || amount === null || amount === "") missing.push("amount");
+    if (!reference) missing.push("reference");
+    if (!timestamp) missing.push("timestamp");
+
+    if (missing.length) {
+      console.error("❌ Missing required parameter(s):", missing.join(", "));
+      return res.json({ error: 7, description: `Missing required parameter(s): ${missing.join(", ")}` });
+    }
+
+    // 2) Prepare hash verification according to doc:
+    //    - take all POST parameters (except hash)
+    //    - include only those with non-empty values
+    //    - sort keys alphabetically
+    //    - join key=value&key2=value2...
+    //    - append SECRET_KEY
+    //    - md5(...)
+    console.log("\n🔐 Step 2: Hash verification");
+
+    // build params object in the same shape we expect PP to send
+    const hashParams = {
+      amount,
+      gameId,
+      providerId,
+      reference,
+      roundDetails,
+      roundId,
+      timestamp,
+      userId,
+      // include optional ones only if present (we'll keep them for debug but calculateHash will filter)
+      bonusCode,
+      platform,
+      token,
+      promoWinAmount,
+      promoWinReference,
+      promoCampaignID,
+      promoCampaignType,
+      specPrizes
+    };
+
+    // Filter undefined/null/empty string exactly how doc expects (do not include hash)
+    const filteredForHash = {};
+    Object.keys(hashParams).forEach((k) => {
+      const v = hashParams[k];
+      if (v !== undefined && v !== null && String(v) !== "") filteredForHash[k] = v;
+    });
+
+    // Show sorted keys / debug string
+    const sortedKeys = Object.keys(filteredForHash).sort();
+    const debugQueryString = sortedKeys.map(k => `${k}=${filteredForHash[k]}`).join("&");
+    const md5Input = debugQueryString + SECRET_KEY;
+
+    console.log("📦 Filtered params for hash (sorted keys):", sortedKeys);
+    console.log("📦 Filtered param string (key=value...):", debugQueryString);
+    console.log("🔑 MD5 input string (paramString + SECRET_KEY):", md5Input);
+
+    // calculate MD5
+    const calculatedHash = crypto.createHash("md5").update(md5Input).digest("hex");
+    console.log("🧾 Calculated MD5:", calculatedHash);
+    console.log("🔍 Provided hash   :", hash);
+
+    if (calculatedHash !== String(hash)) {
+      console.error("❌ Hash mismatch. Rejecting request.");
+      // per doc: in case of failure operator should send error code 5 — but your system previously used 2. We'll return error 5 as doc suggests.
+      return res.json({ error: 5, description: "Hash validation failed" });
+    }
+    console.log("✅ Hash OK");
+
+    // 3) Player lookup
+    console.log("\n👤 Step 3: Lookup player by userId");
+    const player = playersDB[userId];
+    if (!player) {
+      console.error(`🚨 Player not found for userId=${userId}`);
+      return res.json({ error: 1, description: "Player not found" });
+    }
+    console.log("✅ Player found:", { userId: player.userId, currency: player.currency, cash: player.cash, bonus: player.bonus });
+
+    // 4) Idempotency: if this reference already processed return stored result
+    console.log("\n🔁 Step 4: Idempotency check (reference)");
+    if (!global.resultHistory) global.resultHistory = {};
+    if (global.resultHistory[reference]) {
+      console.warn("⚠️ Duplicate result reference detected: returning cached response");
+      console.log("📤 Cached response:", global.resultHistory[reference]);
+      return res.json(global.resultHistory[reference]);
+    }
+
+    // 5) Apply the win amount to player's balance.
+    //    The doc says "Amount of the win. Required" — we treat as numeric (can be 0)
+    console.log("\n💵 Step 5: Apply win amount to player's balance");
+    const winAmount = parseFloat(amount) || 0;
+    console.log(`➡️ winAmount parsed: ${winAmount}`);
+
+    // Add win to cash
+    player.cash = parseFloat((player.cash + winAmount).toFixed(8)); // keep precision, trim later
+    console.log(`✅ Player cash updated => ${player.cash}`);
+
+    // 6) Additional promo handling (optional set of fields that should appear together)
+    if (promoWinAmount || promoWinReference || promoCampaignID || promoCampaignType) {
+      console.log("\n🎁 Promo fields present — validating group");
+      const promoAllPresent = promoWinAmount && promoWinReference && promoCampaignID && promoCampaignType;
+      if (!promoAllPresent) {
+        console.warn("⚠️ Promo fields are partially present — doc requires these 4 fields together. Continuing but logging.");
+      } else {
+        const pAmount = parseFloat(promoWinAmount) || 0;
+        console.log(`➡️ Applying promoWinAmount: ${pAmount} to player.cash`);
+        player.cash = parseFloat((player.cash + pAmount).toFixed(8));
+        // optionally store promo metadata
+        player.promoWins = player.promoWins || [];
+        player.promoWins.push({ promoWinAmount: pAmount, promoWinReference, promoCampaignID, promoCampaignType, timestamp: Date.now() });
+        console.log("✅ Promo applied and stored in player.promoWins");
+      }
+    }
+
+    // 7) Handle specPrizes if provided (bingo-specific)
+    if (specPrizes) {
+      console.log("\n🏆 specPrizes provided, storing them for player (Bingo)");
+      try {
+        // specPrizes might come as array or JSON string
+        let spec = specPrizes;
+        if (typeof specPrizes === "string") {
+          try { spec = JSON.parse(specPrizes); } catch (e) { /* keep string */ }
+        }
+        player.specPrizes = player.specPrizes || [];
+        if (Array.isArray(spec)) {
+          player.specPrizes.push(...spec);
+        } else {
+          player.specPrizes.push(spec);
+        }
+        console.log("✅ specPrizes stored:", player.specPrizes);
+      } catch (err) {
+        console.warn("⚠️ Failed to parse/store specPrizes:", err.message);
+      }
+    }
+
+    // 8) Build response object per doc (transactionId, currency, cash, bonus, error, description)
+    console.log("\n🧾 Step 8: Build response");
+
+    const cashRounded = parseFloat(player.cash.toFixed(2));
+    const bonusRounded = parseFloat((player.bonus || 0).toFixed(2));
+
+    const response = {
+      transactionId: Date.now(),
+      currency: player.currency || "USD",
+      cash: cashRounded,
+      bonus: bonusRounded,
+      error: 0,
+      description: "Success"
+    };
+
+    // store response for idempotency
+    global.resultHistory[reference] = response;
+
+    // 9) (OPTIONAL) Compute response hash for debugging / consistency — not required by doc but useful for logs
+    try {
+      const responseHashInput = `cash=${response.cash}&bonus=${response.bonus}&currency=${response.currency}`; // example
+      const responseHash = crypto.createHash("md5").update(responseHashInput + SECRET_KEY).digest("hex");
+      response.responseHash = responseHash;
+      console.log("🔐 Response hash (debug only):", responseHash, " (md5 of:", responseHashInput + " + SECRET_KEY )");
+    } catch (e) {
+      console.warn("⚠️ Failed to compute response hash:", e.message);
+    }
+
+    // final logs and send
+    console.log("\n📤 Final response to Pragmatic Play:", JSON.stringify(response, null, 2));
+    console.log("==============================");
+    console.log("🎯 [END] /result processed");
+    console.log("==============================\n");
+
+    return res.json(response);
+
+  } catch (err) {
+    console.error("💥 Unexpected error in /result:", err);
+    return res.status(500).json({ error: 1, description: "Internal server error", details: err.message });
   }
-
-  const calculatedHash = calculateHash(
-    { providerId, userId, token, gameId, roundId, amount, reference, timestamp },
-    SECRET_KEY
-  );
-
-  if (calculatedHash !== hash) {
-    return res.json({ error: 2, description: "Invalid hash" });
-  }
-
-  const player = playersDB[userId];
-  if (!player) return res.json({ error: 1, description: "Player not found" });
-
-  if (global.resultHistory[reference]) return res.json(global.resultHistory[reference]);
-
-  player.cash += parseFloat(amount);
-
-  const response = {
-    transactionId: Date.now(),
-    currency: player.currency,
-    cash: player.cash,
-    bonus: player.bonus,
-    error: 0,
-    description: "Success"
-  };
-
-  global.resultHistory[reference] = response;
-  console.log("🏁 Result processed:", response);
-
-  res.json(response);
 });
 
 
