@@ -18,13 +18,13 @@ router.get("/games", async (req, res) => {
     const response = await axios.get(url, {
       headers: {
         Authorization: authHeader,
-        "Accept": "application/json"
+        Accept: "application/json"
       },
       timeout: 15000
     });
 
-    // Check if data exists
-    const rawTables = response.data?.[0]?.data || [];
+    // ✅ Correctly parse response data
+    const rawTables = response.data?.data || [];
     const tables = rawTables.map((table) => ({
       tableName: table["Table Name"],
       tableId: table["Table ID"],
