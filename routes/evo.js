@@ -99,7 +99,7 @@ router.post("/userauth", async (req, res) => {
       }
     };
 
-    const url = `$https://staging-api.asia-live.com/ua/v1/${CASINO_KEY}/authenticate`;
+    const url = `https://staging-api.asia-live.com/ua/v1/${CASINO_KEY}/authenticate`;
     const authHeader =
       "Basic " + Buffer.from(`${CASINO_KEY}:${API_TOKEN}`).toString("base64");
 
