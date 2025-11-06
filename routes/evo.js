@@ -86,7 +86,7 @@ router.post("/userauth", async (req, res) => {
         currency: DEMO_USER.currency,
         session: {
           id: DEMO_USER.sessionId,
-          ip: req.headers["x-forwarded-for"] || req.ip || "127.0.0.1"
+          ip:  req.ip || "127.0.0.1"
         }
       },
       config: {
