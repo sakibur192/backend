@@ -18,7 +18,7 @@ const DEMO_USER = {
   id: "demo_user",
   firstName: "John",
   lastName: "Doe",
-  country: "BAN",
+  country: "BD",
   language: "en",
   currency: "BDT",
   nickname: "demoJohn",
