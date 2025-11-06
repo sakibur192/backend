@@ -10,8 +10,9 @@ const router = express.Router();
 ------------------------------------------------------------------- */
 const EVO_HOST = "https://site-stag-api.nimstad99.com"; // EVO hostname
 const CASINO_KEY = "k3ztnqu12vbxosxm";                  // EVO casino key
-const API_TOKEN = "d09ccec81641149074f92108b7e90078";   // EVO API token
-const AUTH_TOKEN = "s3cr3tV4lu3";                       // Wallet auth token (shared secret)
+const API_TOKEN = "d09ccec81641149074f92108b7e90078"; 
+const AUTH_TOKEN =API_TOKEN 
+// const AUTH_TOKEN = "s3cr3tV4lu3";                       // Wallet auth token (shared secret)
 
 // Demo user store — replace with DB logic in production
 const DEMO_USER = {
