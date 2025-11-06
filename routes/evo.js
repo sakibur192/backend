@@ -1,6 +1,12 @@
 const express = require("express");
 const axios = require("axios");
 const router = express.Router();
+require('dotenv').config();
+const helmet = require("helmet");
+const morgan = require("morgan");
+const rateLimit = require("express-rate-limit");
+const { v4: uuidv4 } = require("uuid");
+
 
 // === EVO Config ===
 const EVO_HOST = "https://site-stag-api.nimstad99.com"; // EVO staging hostname
@@ -61,64 +67,6 @@ router.get("/games", async (req, res) => {
   }
 });
 
-// === CHECK USER ===
-router.get("/check", async (req, res) => {
-  try {
-    const url = `${SERVICE_BASE_URL}/check?authToken=${DEMO_USER.authToken}`;
-    const response = await axios.get(url);
-    return res.status(200).json(response.data);
-  } catch (error) {
-    console.error("CheckUser Error:", error.response?.data || error.message);
-    return res.status(500).json({ message: "Failed to check user", error: error.response?.data || error.message });
-  }
-});
 
-// === BALANCE ===
-router.get("/balance", async (req, res) => {
-  try {
-    const url = `${SERVICE_BASE_URL}/balance?authToken=${DEMO_USER.authToken}`;
-    const response = await axios.get(url);
-    return res.status(200).json(response.data);
-  } catch (error) {
-    console.error("Balance Error:", error.response?.data || error.message);
-    return res.status(500).json({ message: "Failed to fetch balance", error: error.response?.data || error.message });
-  }
-});
-
-// === DEBIT ===
-router.post("/debit", async (req, res) => {
-  try {
-    const url = `${SERVICE_BASE_URL}/debit?authToken=${DEMO_USER.authToken}`;
-    const response = await axios.post(url, req.body);
-    return res.status(200).json(response.data);
-  } catch (error) {
-    console.error("Debit Error:", error.response?.data || error.message);
-    return res.status(500).json({ message: "Failed to debit amount", error: error.response?.data || error.message });
-  }
-});
-
-// === CREDIT ===
-router.post("/credit", async (req, res) => {
-  try {
-    const url = `${SERVICE_BASE_URL}/credit?authToken=${DEMO_USER.authToken}`;
-    const response = await axios.post(url, req.body);
-    return res.status(200).json(response.data);
-  } catch (error) {
-    console.error("Credit Error:", error.response?.data || error.message);
-    return res.status(500).json({ message: "Failed to credit amount", error: error.response?.data || error.message });
-  }
-});
-
-// === CANCEL ===
-router.post("/cancel", async (req, res) => {
-  try {
-    const url = `${SERVICE_BASE_URL}/cancel?authToken=${DEMO_USER.authToken}`;
-    const response = await axios.post(url, req.body);
-    return res.status(200).json(response.data);
-  } catch (error) {
-    console.error("Cancel Error:", error.response?.data || error.message);
-    return res.status(500).json({ message: "Failed to cancel transaction", error: error.response?.data || error.message });
-  }
-});
 
 module.exports = router;
