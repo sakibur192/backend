@@ -64,7 +64,15 @@ router.get("/games", async (req, res) => {
  */
 router.post("/userauth", async (req, res) => {
   try {
-    const url = `${EVO_HOST}/ua/v1/${CASINO_KEY}/${API_TOKEN}`;
+    const tableId =
+      req.body?.config?.game?.table?.id ||
+      req.body?.tableId ||
+      null;
+
+    if (!tableId) {
+      return res.status(400).json({ error: "Missing table.id from client" });
+    }
+
     const payload = {
       uuid: uuidv4(),
       player: {
@@ -78,25 +86,38 @@ router.post("/userauth", async (req, res) => {
         currency: DEMO_USER.currency,
         session: {
           id: DEMO_USER.sessionId,
-          ip: req.ip || "127.0.0.1"
+          ip: req.headers["x-forwarded-for"] || req.ip || "127.0.0.1"
         }
       },
       config: {
         game: {
           category: "roulette",
           interface: "view1",
-          table: { id: "vip-roulette-123" }
+          table: { id: tableId }
         },
         channel: { wrapped: false, mobile: false }
       }
     };
+
+    const url = `${EVO_HOST}/ua/v1/${CASINO_KEY}/authenticate`;
+    const authHeader =
+      "Basic " + Buffer.from(`${CASINO_KEY}:${API_TOKEN}`).toString("base64");
+
     const response = await axios.post(url, payload, {
-      headers: { "Content-Type": "application/json" }
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json"
+      }
     });
-    res.json(response.data);
+
+    return res.json(response.data);
+
   } catch (error) {
-    console.error("EVO /userauth error:", error.response?.data || error.message);
-    res.status(500).json({ error: error.response?.data || error.message });
+    console.error("❌ EVO /userauth error:", error.response?.data || error.message);
+    return res.status(500).json({
+      error: error.message,
+      evo: error.response?.data
+    });
   }
 });
 
