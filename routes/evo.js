@@ -101,7 +101,7 @@ router.post("/userauth", async (req, res) => {
 
     const url = `https://staging-api.asia-live.com/ua/v1/${CASINO_KEY}/${API_TOKEN}`;
     const authHeader =
-      "Basic " + Buffer.from(`${CASINO_KEY}:${AUTH_TOKEN}`).toString("base64");
+      "Basic " + Buffer.from(`${CASINO_KEY}:${API_TOKEN}`).toString("base64");
 
     const response = await axios.post(url, payload, {
       headers: {
