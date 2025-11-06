@@ -18,9 +18,9 @@ const DEMO_USER = {
   id: "demo_user",
   firstName: "John",
   lastName: "Doe",
-  country: "DE",
+  country: "BAN",
   language: "en",
-  currency: "USD",
+  currency: "BDT",
   nickname: "demoJohn",
   sessionId: "sess-demo-001",
   balance: 5000.00
